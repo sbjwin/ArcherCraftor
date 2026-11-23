@@ -1,3 +1,4 @@
+using System.IO;
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -8,114 +9,108 @@ using ArcherCraftor.Combat;
 using ArcherCraftor.Player;
 using ArcherCraftor.Enemy;
 using ArcherCraftor.Core;
-using ArcherCraftor.Vision;
+using ArcherCraftor.Crafting;
 using ArcherCraftor.UI;
 
 namespace ArcherCraftor.Editor
 {
+    /// <summary>
+    /// 최소 구성(플레이어 + 고정된 적 1체) 2D 테스트 샌드박스 씬 빌더
+    /// </summary>
     public static class ArcherCraftorSceneBuilder
     {
+        private const string ScenePath = "Assets/Scenes/PrototypeSandbox.unity";
+        private const string SpritesDir = "Assets/Sprites";
+        private const string PrefabsDir = "Assets/Prefabs";
+
         [MenuItem("ArcherCraftor/Setup Prototype Sandbox Scene")]
         public static void SetupPrototypeScene()
         {
-            // 1. 새 씬 생성
-            var newScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            BuildSceneInternal(showDialog: true);
+        }
 
-            // 2. 태그 및 레이어 안내/설정 확인
+        public static void SetupPrototypeSceneBatch()
+        {
+            BuildSceneInternal(showDialog: false);
+        }
+
+        private static void BuildSceneInternal(bool showDialog)
+        {
+            EnsureDirectories();
             EnsureTagExists("Player");
             EnsureTagExists("Enemy");
             EnsureTagExists("Obstacle");
             EnsureURPPipelineAsset();
 
-            // 3. 라이트 & 게임 매니저 생성
-            GameObject dirLight = new GameObject("Directional Light");
-            var lightComp = dirLight.AddComponent<Light>();
-            lightComp.type = LightType.Directional;
-            lightComp.color = new Color(1f, 0.96f, 0.9f);
-            lightComp.intensity = 1.1f;
-            dirLight.AddComponent<UniversalAdditionalLightData>();
-            dirLight.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+            var newScene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
+            // 1. 기본 2D 스프라이트 생성
+            Sprite groundGridSprite = CreateGridFloorSprite("Spr_GroundTile", 64);
+            Sprite playerBodySprite = CreateArcherBodySprite("Spr_PlayerBody", 32);
+            Sprite bowSprite = CreateBowSprite("Spr_Bow", 32);
+            Sprite quiverSprite = CreateDiamondSprite("Spr_QuiverGlow", 16, Color.white);
+            Sprite arrowSprite = CreateArrowSprite("Spr_Arrow", 32);
+            Sprite enemySprite = CreateEnemyGolemSprite("Spr_EnemyGolem", 32);
+            Sprite bulletSprite = CreateCircleSprite("Spr_Bullet", 24, Color.white, outline: new Color(1f, 0.65f, 0.65f));
+            Sprite circleSprite = CreateCircleSprite("Spr_Circle", 32, Color.white, outline: Color.clear);
+            Sprite ringSprite = CreateRingSprite("Spr_Ring", 64, thickness: 6);
+
+            // 2. 바닥 격자 & 매니저
+            CreateGridFloor(groundGridSprite);
             GameObject gmObj = new GameObject("GameManager");
             gmObj.AddComponent<GameManager>();
+            gmObj.AddComponent<FieldCraftingManager>();
 
-            // 4. 바닥 (Ground)
-            GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            ground.name = "Ground";
-            ground.transform.position = Vector3.zero;
-            ground.transform.localScale = new Vector3(5f, 1f, 5f); // 50m x 50m
-
-            // 바닥 머티리얼 (어두운 회색 설원/포장 느낌)
-            Material groundMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-            groundMat.color = new Color(0.22f, 0.25f, 0.28f);
-            AssetDatabase.CreateAsset(groundMat, "Assets/Materials/Mat_Ground.mat");
-            ground.GetComponent<MeshRenderer>().sharedMaterial = groundMat;
-
-            // 5. 장애물 기둥 (Obstacles)
-            Material obstacleMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-            obstacleMat.color = new Color(0.45f, 0.5f, 0.55f);
-            AssetDatabase.CreateAsset(obstacleMat, "Assets/Materials/Mat_Obstacle.mat");
-
-            Vector3[] obstaclePositions = new Vector3[]
-            {
-                new Vector3(-6f, 1.5f, 4f),
-                new Vector3(6f, 1.5f, 3f),
-                new Vector3(0f, 1.5f, 9f),
-                new Vector3(-8f, 1.5f, -5f),
-                new Vector3(7f, 1.5f, -6f)
-            };
-
-            GameObject obstacleRoot = new GameObject("Obstacles");
-            foreach (var pos in obstaclePositions)
-            {
-                GameObject obs = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                obs.name = "Obstacle_Pillar";
-                obs.tag = "Obstacle";
-                obs.transform.position = pos;
-                obs.transform.localScale = new Vector3(2f, 3f, 2f);
-                obs.transform.parent = obstacleRoot.transform;
-                obs.GetComponent<MeshRenderer>().sharedMaterial = obstacleMat;
-            }
-
-            // 6. 프리팹 생성: 탄막 상쇄 스파크 이펙트 (Parry Spark)
+            // 3. 프리팹 생성
             GameObject sparkPrefab = CreateSparkVFXPrefab();
+            GameObject bulletPrefab = CreateEnemyBulletPrefab(bulletSprite, sparkPrefab);
+            GameObject arrowPrefab = CreateArrowPrefab(arrowSprite, sparkPrefab, circleSprite);
 
-            // 7. 프리팹 생성: 적 탄환 (Enemy Bullet)
-            GameObject bulletPrefab = CreateEnemyBulletPrefab(sparkPrefab);
+            // 4. 플레이어 (노란색 FOV 범위 미표시)
+            GameObject player = CreatePlayerObject(playerBodySprite, bowSprite, quiverSprite, arrowPrefab);
 
-            // 8. 프리팹 생성: 플레이어 화살 (Arrow Projectile)
-            GameObject arrowPrefab = CreateArrowPrefab(sparkPrefab);
+            // 5. 2D 직교 카메라
+            CreateTopDown2DCamera(player);
 
-            // 9. 플레이어 캐릭터 생성
-            GameObject player = CreatePlayerObject(arrowPrefab);
+            // 6. 고정된 적 1체 (5초마다 1발 조준 사격)
+            CreateSingleStationaryEnemy(enemySprite, bulletPrefab);
 
-            // 10. FOV (Field Of View) 시야각 메시 생성
-            CreateFOVVisualizer(player);
+            // 7. 최소 조준선 UI
+            CreateMinimalUI(player, circleSprite, ringSprite);
 
-            // 11. 쿼터뷰 카메라 생성
-            CreateTopDownCamera(player);
-
-            // 12. 적 (Enemy) 2체 스폰
-            CreateEnemies(bulletPrefab, player);
-
-            // 13. UI Canvas (조준선, 게이지, HUD)
-            CreateUIElements(player);
-
-            // 14. 씬 저장
-            EditorSceneManager.SaveScene(newScene, "Assets/Scenes/PrototypeSandbox.unity");
+            // 8. 씬 저장 및 빌드 등록
+            EditorSceneManager.SaveScene(newScene, ScenePath);
+            RegisterSceneInBuildSettings(ScenePath);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            EditorUtility.DisplayDialog("ArcherCraftor Setup Complete",
-                "프로토타입 샌드박스 씬(PrototypeSandbox.unity) 생성이 완료되었습니다!\n\n" +
-                "▶ 조작법:\n" +
-                "- WASD: 이동\n" +
-                "- Space: 대시/회피\n" +
-                "- 좌클릭 탭: 즉발 퀵샷 (탄막 즉시 상쇄 요격)\n" +
-                "- 좌클릭 홀드: 파워샷 차징 (사거리/대미지/관통 증가)\n" +
-                "- 우클릭 or F: 근접 발차기 넉백\n" +
-                "- R: 씬 재시작\n\n" +
-                "이제 [Play] 버튼을 눌러 테스트해 보세요!", "확인");
+            if (showDialog)
+            {
+                EditorUtility.DisplayDialog("ArcherCraftor 2D Minimal Scene",
+                    "단순화된 2D 테스트 씬(PrototypeSandbox.unity) 생성이 완료되었습니다!\n\n" +
+                    "- 플레이어와 고정된 적 1체만 배치됩니다.\n" +
+                    "- 적은 이동하지 않으며 5초마다 1발씩 사격합니다.\n" +
+                    "- 항상 보이던 노란색 시야 범위는 제거되었습니다.", "확인");
+            }
+        }
+
+        private static void EnsureDirectories()
+        {
+            if (!AssetDatabase.IsValidFolder("Assets/Scenes")) AssetDatabase.CreateFolder("Assets", "Scenes");
+            if (!AssetDatabase.IsValidFolder(SpritesDir)) AssetDatabase.CreateFolder("Assets", "Sprites");
+            if (!AssetDatabase.IsValidFolder(PrefabsDir)) AssetDatabase.CreateFolder("Assets", "Prefabs");
+        }
+
+        private static void CreateGridFloor(Sprite groundGridSprite)
+        {
+            GameObject ground = new GameObject("Ground_Grid");
+            ground.transform.position = Vector3.zero;
+            var sr = ground.AddComponent<SpriteRenderer>();
+            sr.sprite = groundGridSprite;
+            sr.drawMode = SpriteDrawMode.Tiled;
+            sr.size = new Vector2(80f, 80f);
+            sr.sortingLayerName = "Background";
+            sr.sortingOrder = 0;
         }
 
         private static GameObject CreateSparkVFXPrefab()
@@ -123,100 +118,164 @@ namespace ArcherCraftor.Editor
             GameObject spark = new GameObject("FX_ParrySpark");
             var ps = spark.AddComponent<ParticleSystem>();
             var main = ps.main;
-            main.duration = 0.4f;
-            main.startLifetime = 0.3f;
-            main.startSpeed = 8f;
-            main.startSize = 0.25f;
-            main.startColor = new Color(1f, 0.85f, 0.2f); // 밝은 황금빛 스파크
+            main.duration = 0.35f;
+            main.startLifetime = 0.28f;
+            main.startSpeed = 7f;
+            main.startSize = 0.22f;
+            main.startColor = new Color(1f, 0.88f, 0.25f);
             main.loop = false;
 
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Circle;
+            shape.radius = 0.2f;
+
             var emission = ps.emission;
-            emission.SetBursts(new ParticleSystem.Burst[] { new ParticleSystem.Burst(0f, 25) });
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 22) });
+
+            if (spark.TryGetComponent<ParticleSystemRenderer>(out var psr))
+            {
+                psr.sortingLayerName = "Effects";
+                psr.sortingOrder = 10;
+            }
 
             spark.AddComponent<ImpactEffect>();
-            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(spark, "Assets/Prefabs/FX_ParrySpark.prefab");
+            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(spark, $"{PrefabsDir}/FX_ParrySpark.prefab");
             Object.DestroyImmediate(spark);
             return prefab;
         }
 
-        private static GameObject CreateEnemyBulletPrefab(GameObject sparkPrefab)
+        private static GameObject CreateEnemyBulletPrefab(Sprite bulletSprite, GameObject sparkPrefab)
         {
-            GameObject bulletObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            bulletObj.name = "EnemyBullet";
-            bulletObj.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+            GameObject bulletObj = new GameObject("EnemyBullet");
+            int bulletLayer = LayerMask.NameToLayer("EnemyBullet");
+            if (bulletLayer >= 0) bulletObj.layer = bulletLayer;
 
-            var col = bulletObj.GetComponent<SphereCollider>();
+            var sr = bulletObj.AddComponent<SpriteRenderer>();
+            sr.sprite = bulletSprite;
+            sr.color = new Color(1f, 0.24f, 0.24f);
+            sr.sortingLayerName = "Projectiles";
+            sr.sortingOrder = 5;
+            bulletObj.transform.localScale = new Vector3(0.65f, 0.65f, 1f);
+
+            var col = bulletObj.AddComponent<CircleCollider2D>();
             col.isTrigger = true;
-
-            Material bulletMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-            bulletMat.color = new Color(1f, 0.2f, 0.2f); // 붉은색 탄환
-            bulletMat.EnableKeyword("_EMISSION");
-            bulletMat.SetColor("_EmissionColor", new Color(1f, 0.1f, 0.1f) * 2f);
-            AssetDatabase.CreateAsset(bulletMat, "Assets/Materials/Mat_Bullet.mat");
-            bulletObj.GetComponent<MeshRenderer>().sharedMaterial = bulletMat;
+            col.radius = 0.36f;
 
             var bullet = bulletObj.AddComponent<EnemyBullet>();
             SerializedObject so = new SerializedObject(bullet);
             so.FindProperty("parrySparkEffectPrefab").objectReferenceValue = sparkPrefab;
             so.ApplyModifiedProperties();
 
-            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(bulletObj, "Assets/Prefabs/EnemyBullet.prefab");
+            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(bulletObj, $"{PrefabsDir}/EnemyBullet.prefab");
             Object.DestroyImmediate(bulletObj);
             return prefab;
         }
 
-        private static GameObject CreateArrowPrefab(GameObject sparkPrefab)
+        private static GameObject CreateArrowPrefab(Sprite arrowSprite, GameObject sparkPrefab, Sprite circleSprite)
         {
-            GameObject arrowObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            arrowObj.name = "ArrowProjectile";
-            arrowObj.transform.localScale = new Vector3(0.12f, 0.5f, 0.12f);
-            arrowObj.transform.rotation = Quaternion.Euler(90f, 0f, 0f); // 전방 정렬
+            GameObject arrowObj = new GameObject("ArrowProjectile");
+            int arrowLayer = LayerMask.NameToLayer("PlayerArrow");
+            if (arrowLayer >= 0) arrowObj.layer = arrowLayer;
 
-            // 실린더 기본 콜라이더 제거 후 구형 트리거 부착
-            Object.DestroyImmediate(arrowObj.GetComponent<CapsuleCollider>());
-            var col = arrowObj.AddComponent<SphereCollider>();
+            var sr = arrowObj.AddComponent<SpriteRenderer>();
+            sr.sprite = arrowSprite;
+            sr.color = new Color(0.75f, 0.96f, 1f);
+            sr.sortingLayerName = "Projectiles";
+            sr.sortingOrder = 8;
+
+            var col = arrowObj.AddComponent<CircleCollider2D>();
             col.isTrigger = true;
-            col.radius = 0.6f;
-
-            Material arrowMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-            arrowMat.color = new Color(0.2f, 0.9f, 1f); // 청록빛 발광 화살
-            arrowMat.EnableKeyword("_EMISSION");
-            arrowMat.SetColor("_EmissionColor", new Color(0.2f, 0.9f, 1f) * 1.5f);
-            AssetDatabase.CreateAsset(arrowMat, "Assets/Materials/Mat_Arrow.mat");
-            arrowObj.GetComponent<MeshRenderer>().sharedMaterial = arrowMat;
+            col.radius = 0.42f;
 
             var arrow = arrowObj.AddComponent<ArrowProjectile>();
             SerializedObject so = new SerializedObject(arrow);
             so.FindProperty("parrySparkPrefab").objectReferenceValue = sparkPrefab;
+            so.FindProperty("zoneSprite").objectReferenceValue = circleSprite;
+            int bulletLayer = LayerMask.NameToLayer("EnemyBullet");
+            if (bulletLayer >= 0)
+            {
+                so.FindProperty("enemyBulletLayer").intValue = 1 << bulletLayer;
+            }
             so.ApplyModifiedProperties();
 
-            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(arrowObj, "Assets/Prefabs/ArrowProjectile.prefab");
+            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(arrowObj, $"{PrefabsDir}/ArrowProjectile.prefab");
             Object.DestroyImmediate(arrowObj);
             return prefab;
         }
 
-        private static GameObject CreatePlayerObject(GameObject arrowPrefab)
+        private static GameObject CreatePlayerObject(Sprite bodySprite, Sprite bowSprite, Sprite quiverSprite, GameObject arrowPrefab)
         {
-            GameObject player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            player.name = "Player_Archer";
+            GameObject player = new GameObject("Player_Archer");
             player.tag = "Player";
-            player.transform.position = new Vector3(0f, 1f, 0f);
+            int playerLayer = LayerMask.NameToLayer("Player");
+            if (playerLayer >= 0) player.layer = playerLayer;
+            player.transform.position = Vector3.zero;
 
-            Material playerMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-            playerMat.color = new Color(0.2f, 0.65f, 0.4f); // 녹색 후드 궁수 느낌
-            AssetDatabase.CreateAsset(playerMat, "Assets/Materials/Mat_Player.mat");
-            player.GetComponent<MeshRenderer>().sharedMaterial = playerMat;
+            var rb = player.AddComponent<Rigidbody2D>();
+            rb.gravityScale = 0f;
+            rb.freezeRotation = true;
 
-            player.AddComponent<CharacterController>();
+            var col = player.AddComponent<CircleCollider2D>();
+            col.radius = 0.42f;
+
             player.AddComponent<Health>();
-            player.AddComponent<PlayerController>();
-
+            var controller = player.AddComponent<PlayerController>();
             var bow = player.AddComponent<PlayerBow>();
 
-            // 발사 위치 FirePoint 오브젝트
+            GameObject bodyObj = new GameObject("BodySprite");
+            bodyObj.transform.parent = player.transform;
+            bodyObj.transform.localPosition = Vector3.zero;
+            var bodySr = bodyObj.AddComponent<SpriteRenderer>();
+            bodySr.sprite = bodySprite;
+            bodySr.sortingLayerName = "Actors";
+            bodySr.sortingOrder = 10;
+
+            GameObject quiverObj = new GameObject("QuiverGlow");
+            quiverObj.transform.parent = player.transform;
+            quiverObj.transform.localPosition = new Vector3(-0.22f, 0.18f, 0f);
+            quiverObj.transform.localScale = new Vector3(0.55f, 0.55f, 1f);
+            var quiverSr = quiverObj.AddComponent<SpriteRenderer>();
+            quiverSr.sprite = quiverSprite;
+            quiverSr.color = ArrowVisualProfile.GetArrowColor(ArrowType.Impact);
+            quiverSr.sortingLayerName = "Actors";
+            quiverSr.sortingOrder = 9;
+
+            GameObject bowPivot = new GameObject("BowPivot");
+            bowPivot.transform.parent = player.transform;
+            bowPivot.transform.localPosition = Vector3.zero;
+
+            GameObject bowObj = new GameObject("BowSprite");
+            bowObj.transform.parent = bowPivot.transform;
+            bowObj.transform.localPosition = new Vector3(0.55f, 0f, 0f);
+            var bowSr = bowObj.AddComponent<SpriteRenderer>();
+            bowSr.sprite = bowSprite;
+            bowSr.sortingLayerName = "Actors";
+            bowSr.sortingOrder = 11;
+
             GameObject firePoint = new GameObject("FirePoint");
-            firePoint.transform.parent = player.transform;
-            firePoint.transform.localPosition = new Vector3(0f, 0.3f, 0.8f);
+            firePoint.transform.parent = bowPivot.transform;
+            firePoint.transform.localPosition = new Vector3(0.85f, 0f, 0f);
+
+            GameObject scarfObj = new GameObject("Scarf_Verlet");
+            scarfObj.transform.parent = player.transform;
+            scarfObj.transform.localPosition = Vector3.zero;
+            var scarfLine = scarfObj.AddComponent<LineRenderer>();
+            scarfLine.startWidth = 0.2f;
+            scarfLine.endWidth = 0.06f;
+            scarfLine.numCapVertices = 4;
+            scarfLine.material = new Material(Shader.Find("Sprites/Default"));
+            scarfLine.startColor = new Color(0.18f, 0.85f, 0.55f, 0.95f);
+            scarfLine.endColor = new Color(0.65f, 1f, 0.78f, 0.45f);
+            scarfLine.sortingLayerName = "Actors";
+            scarfLine.sortingOrder = 8;
+            scarfObj.AddComponent<ScarfVerlet2D>();
+
+            SerializedObject ctrlSo = new SerializedObject(controller);
+            ctrlSo.FindProperty("bodyRenderer").objectReferenceValue = bodySr;
+            ctrlSo.FindProperty("bowPivot").objectReferenceValue = bowPivot.transform;
+            ctrlSo.FindProperty("bowRenderer").objectReferenceValue = bowSr;
+            ctrlSo.FindProperty("quiverGlowRenderer").objectReferenceValue = quiverSr;
+            ctrlSo.ApplyModifiedProperties();
 
             SerializedObject bowSo = new SerializedObject(bow);
             bowSo.FindProperty("arrowPrefab").objectReferenceValue = arrowPrefab;
@@ -226,89 +285,365 @@ namespace ArcherCraftor.Editor
             return player;
         }
 
-        private static void CreateFOVVisualizer(GameObject player)
-        {
-            GameObject fovObj = new GameObject("FieldOfView_Visualizer");
-            fovObj.transform.parent = player.transform;
-            fovObj.transform.localPosition = new Vector3(0f, 0.1f, 0f);
-
-            var fov = fovObj.AddComponent<FieldOfView>();
-
-            Material fovMat = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color"));
-            fovMat.color = new Color(1f, 1f, 0.4f, 0.15f); // 은은한 노란색 시야 부채꼴
-            AssetDatabase.CreateAsset(fovMat, "Assets/Materials/Mat_FOV.mat");
-            fovObj.GetComponent<MeshRenderer>().sharedMaterial = fovMat;
-        }
-
-        private static void CreateTopDownCamera(GameObject player)
+        private static void CreateTopDown2DCamera(GameObject player)
         {
             GameObject camObj = new GameObject("Main Camera");
             camObj.tag = "MainCamera";
             var cam = camObj.AddComponent<Camera>();
+            cam.orthographic = true;
+            cam.orthographicSize = 8.5f;
+            cam.backgroundColor = new Color(0.12f, 0.14f, 0.16f);
+            cam.clearFlags = CameraClearFlags.SolidColor;
+
             camObj.AddComponent<UniversalAdditionalCameraData>();
             camObj.AddComponent<AudioListener>();
-
-            var follow = camObj.AddComponent<TopDownCameraFollow>();
-            camObj.transform.position = player.transform.position + new Vector3(0f, 15f, -9f);
+            camObj.AddComponent<TopDownCameraFollow>();
+            camObj.transform.position = new Vector3(player.transform.position.x, player.transform.position.y, -10f);
         }
 
-        private static void CreateEnemies(GameObject bulletPrefab, GameObject player)
+        private static void CreateSingleStationaryEnemy(Sprite enemySprite, GameObject bulletPrefab)
         {
-            Material enemyMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-            enemyMat.color = new Color(0.85f, 0.3f, 0.25f); // 붉은색 기계 골렘 몬스터
-            AssetDatabase.CreateAsset(enemyMat, "Assets/Materials/Mat_Enemy.mat");
+            Vector3 spawnPos = new Vector3(6f, 0f, 0f);
 
-            Vector3[] spawnPositions = new Vector3[]
-            {
-                new Vector3(-4f, 1f, 8f),
-                new Vector3(5f, 1f, 10f)
-            };
+            GameObject enemyTemplate = new GameObject("Enemy_Golem");
+            enemyTemplate.tag = "Enemy";
+            int enemyLayer = LayerMask.NameToLayer("Enemy");
+            if (enemyLayer >= 0) enemyTemplate.layer = enemyLayer;
 
-            for (int i = 0; i < spawnPositions.Length; i++)
-            {
-                GameObject enemy = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-                enemy.name = $"Enemy_Golem_{i + 1}";
-                enemy.tag = "Enemy";
-                enemy.transform.position = spawnPositions[i];
-                enemy.GetComponent<MeshRenderer>().sharedMaterial = enemyMat;
+            var sr = enemyTemplate.AddComponent<SpriteRenderer>();
+            sr.sprite = enemySprite;
+            sr.sortingLayerName = "Actors";
+            sr.sortingOrder = 9;
 
-                enemy.AddComponent<Health>();
-                var emitter = enemy.AddComponent<EnemyBulletEmitter>();
-                var ai = enemy.AddComponent<EnemyAI>();
+            var rb = enemyTemplate.AddComponent<Rigidbody2D>();
+            rb.gravityScale = 0f;
+            rb.freezeRotation = true;
+            rb.constraints = RigidbodyConstraints2D.FreezeAll;
 
-                SerializedObject emitterSo = new SerializedObject(emitter);
-                emitterSo.FindProperty("bulletPrefab").objectReferenceValue = bulletPrefab;
-                emitterSo.ApplyModifiedProperties();
-            }
+            var col = enemyTemplate.AddComponent<CircleCollider2D>();
+            col.radius = 0.55f;
+
+            enemyTemplate.AddComponent<Health>();
+            var emitter = enemyTemplate.AddComponent<EnemyBulletEmitter>();
+            var ai = enemyTemplate.AddComponent<EnemyAI>();
+
+            SerializedObject emitterSo = new SerializedObject(emitter);
+            emitterSo.FindProperty("bulletPrefab").objectReferenceValue = bulletPrefab;
+            emitterSo.ApplyModifiedProperties();
+
+            SerializedObject aiSo = new SerializedObject(ai);
+            aiSo.FindProperty("isStationary").boolValue = true;
+            aiSo.FindProperty("detectionRadius").floatValue = 30f;
+            aiSo.FindProperty("attackRadius").floatValue = 30f;
+            aiSo.FindProperty("attackInterval").floatValue = 5.0f;
+            aiSo.FindProperty("defaultPattern").enumValueIndex = (int)EnemyAI.AttackPattern.AimShot;
+            aiSo.ApplyModifiedProperties();
+
+            GameObject enemyPrefab = PrefabUtility.SaveAsPrefabAsset(enemyTemplate, $"{PrefabsDir}/Enemy_Golem.prefab");
+            Object.DestroyImmediate(enemyTemplate);
+
+            GameObject initialEnemy = (GameObject)PrefabUtility.InstantiatePrefab(enemyPrefab);
+            initialEnemy.transform.position = spawnPos;
+
+            GameObject spawnerObj = new GameObject("Enemy_Spawner");
+            spawnerObj.transform.position = spawnPos;
+            var respawner = spawnerObj.AddComponent<EnemyRespawner2D>();
+            SerializedObject respSo = new SerializedObject(respawner);
+            respSo.FindProperty("enemyPrefab").objectReferenceValue = enemyPrefab;
+            respSo.FindProperty("currentEnemy").objectReferenceValue = initialEnemy;
+            respSo.FindProperty("respawnDelay").floatValue = 3.0f;
+            respSo.ApplyModifiedProperties();
         }
 
-        private static void CreateUIElements(GameObject player)
+        private static void CreateMinimalUI(GameObject player, Sprite circleSprite, Sprite ringSprite)
         {
-            // UI Canvas 생성
             GameObject canvasObj = new GameObject("InGame_Canvas");
             var canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvasObj.AddComponent<CanvasScaler>();
+            var scaler = canvasObj.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
             canvasObj.AddComponent<GraphicRaycaster>();
 
-            // AimReticleUI 컴포넌트 부착
+            // 마우스 크로스헤어 & 차징 링만 유지 (항상 보이는 범위 링/가이드 제거)
+            GameObject crosshairObj = new GameObject("AimCrosshair", typeof(RectTransform));
+            crosshairObj.transform.SetParent(canvasObj.transform, false);
+            var crosshairRect = crosshairObj.GetComponent<RectTransform>();
+            crosshairRect.sizeDelta = new Vector2(44f, 44f);
+
+            var centerDot = new GameObject("Dot", typeof(RectTransform), typeof(Image));
+            centerDot.transform.SetParent(crosshairObj.transform, false);
+            centerDot.GetComponent<RectTransform>().sizeDelta = new Vector2(8f, 8f);
+            var dotImg = centerDot.GetComponent<Image>();
+            dotImg.sprite = circleSprite;
+            dotImg.color = Color.white;
+            dotImg.raycastTarget = false;
+
+            var chargeRingObj = new GameObject("ChargeRing", typeof(RectTransform), typeof(Image));
+            chargeRingObj.transform.SetParent(crosshairObj.transform, false);
+            chargeRingObj.GetComponent<RectTransform>().sizeDelta = new Vector2(40f, 40f);
+            var chargeImg = chargeRingObj.GetComponent<Image>();
+            chargeImg.sprite = ringSprite;
+            chargeImg.type = Image.Type.Filled;
+            chargeImg.fillMethod = Image.FillMethod.Radial360;
+            chargeImg.fillAmount = 0f;
+            chargeImg.raycastTarget = false;
+
+            GameObject aimConeObj = new GameObject("AimConeGuide");
+            var aimConeLine = aimConeObj.AddComponent<LineRenderer>();
+            aimConeLine.startWidth = 0.05f;
+            aimConeLine.endWidth = 0.05f;
+            aimConeLine.material = new Material(Shader.Find("Sprites/Default"));
+            aimConeLine.sortingLayerName = "GroundDecal";
+            aimConeLine.sortingOrder = 3;
+            aimConeLine.enabled = false;
+
             var aimUI = canvasObj.AddComponent<AimReticleUI>();
-
-            // 사거리 링 LineRenderer 오브젝트
-            GameObject rangeRingObj = new GameObject("OptimalRangeRing");
-            var lineRenderer = rangeRingObj.AddComponent<LineRenderer>();
-            lineRenderer.startWidth = 0.08f;
-            lineRenderer.endWidth = 0.08f;
-            lineRenderer.material = new Material(Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Sprites/Default"));
-            lineRenderer.startColor = new Color(0.3f, 0.8f, 1f, 0.5f);
-            lineRenderer.endColor = new Color(0.3f, 0.8f, 1f, 0.5f);
-
             SerializedObject aimSo = new SerializedObject(aimUI);
-            aimSo.FindProperty("rangeRingLine").objectReferenceValue = lineRenderer;
+            aimSo.FindProperty("playerBow").objectReferenceValue = player.GetComponent<PlayerBow>();
+            aimSo.FindProperty("playerController").objectReferenceValue = player.GetComponent<PlayerController>();
+            aimSo.FindProperty("crosshairRect").objectReferenceValue = crosshairRect;
+            aimSo.FindProperty("chargeFillImage").objectReferenceValue = chargeImg;
+            aimSo.FindProperty("aimConeLine").objectReferenceValue = aimConeLine;
             aimSo.ApplyModifiedProperties();
+        }
 
-            // 체력 HUD UI
-            canvasObj.AddComponent<InGameHUD>();
+        #region Procedural 2D Sprite Generators
+
+        private static Sprite SaveAndLoadSprite(string name, Texture2D tex, float pixelsPerUnit = 32f)
+        {
+            string path = $"{SpritesDir}/{name}.png";
+            File.WriteAllBytes(path, tex.EncodeToPNG());
+            Object.DestroyImmediate(tex);
+
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (importer != null)
+            {
+                importer.textureType = TextureImporterType.Sprite;
+                importer.spriteImportMode = SpriteImportMode.Single;
+                importer.spritePixelsPerUnit = pixelsPerUnit;
+                importer.filterMode = FilterMode.Point;
+                importer.textureCompression = TextureImporterCompression.Uncompressed;
+
+                var settings = new TextureImporterSettings();
+                importer.ReadTextureSettings(settings);
+                settings.spriteMeshType = SpriteMeshType.FullRect;
+                importer.SetTextureSettings(settings);
+
+                importer.SaveAndReimport();
+            }
+
+            return AssetDatabase.LoadAssetAtPath<Sprite>(path);
+        }
+
+        private static Sprite CreateGridFloorSprite(string name, int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color cellA = new Color(0.13f, 0.15f, 0.18f);
+            Color cellB = new Color(0.15f, 0.17f, 0.21f);
+            Color gridLine = new Color(0.24f, 0.28f, 0.34f);
+
+            int half = size / 2;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    bool isLine = x == 0 || y == 0 || x == half || y == half;
+                    bool checker = ((x / half) + (y / half)) % 2 == 0;
+                    tex.SetPixel(x, y, isLine ? gridLine : (checker ? cellA : cellB));
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex, pixelsPerUnit: 32f);
+        }
+
+        private static Sprite CreateArcherBodySprite(string name, int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color clear = new Color(0, 0, 0, 0);
+            Color cloak = new Color(0.2f, 0.72f, 0.42f);
+            Color hood = new Color(0.14f, 0.52f, 0.3f);
+            Color face = new Color(0.95f, 0.85f, 0.72f);
+
+            float c = (size - 1) * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x - c) / (size * 0.35f);
+                    float dy = (y - c) / (size * 0.42f);
+                    float d = dx * dx + dy * dy;
+
+                    if (d > 1.0f) tex.SetPixel(x, y, clear);
+                    else if (y > size * 0.65f) tex.SetPixel(x, y, hood);
+                    else if (y > size * 0.48f && Mathf.Abs(x - c) < size * 0.18f) tex.SetPixel(x, y, face);
+                    else tex.SetPixel(x, y, cloak);
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex);
+        }
+
+        private static Sprite CreateEnemyGolemSprite(string name, int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color clear = new Color(0, 0, 0, 0);
+            Color body = new Color(0.75f, 0.25f, 0.25f);
+            Color core = new Color(1f, 0.45f, 0.2f);
+            Color dark = new Color(0.35f, 0.12f, 0.14f);
+
+            float c = (size - 1) * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = Mathf.Abs(x - c) / (size * 0.42f);
+                    float dy = Mathf.Abs(y - c) / (size * 0.42f);
+                    if (dx > 1f || dy > 1f || dx + dy > 1.55f)
+                        tex.SetPixel(x, y, clear);
+                    else if (dx < 0.22f && dy < 0.22f)
+                        tex.SetPixel(x, y, core);
+                    else if (dx > 0.85f || dy > 0.85f)
+                        tex.SetPixel(x, y, dark);
+                    else
+                        tex.SetPixel(x, y, body);
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex);
+        }
+
+        private static Sprite CreateBowSprite(string name, int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color clear = new Color(0, 0, 0, 0);
+            Color wood = new Color(0.82f, 0.6f, 0.32f);
+            Color stringCol = new Color(0.85f, 0.96f, 1f, 0.8f);
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float ny = (y - size * 0.5f) / (size * 0.42f);
+                    float arcX = size * 0.65f - (ny * ny) * (size * 0.35f);
+                    if (Mathf.Abs(ny) <= 1f && Mathf.Abs(x - arcX) <= 2.2f)
+                        tex.SetPixel(x, y, wood);
+                    else if (Mathf.Abs(ny) <= 0.95f && Mathf.Abs(x - size * 0.3f) <= 0.8f)
+                        tex.SetPixel(x, y, stringCol);
+                    else
+                        tex.SetPixel(x, y, clear);
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex);
+        }
+
+        private static Sprite CreateArrowSprite(string name, int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color clear = new Color(0, 0, 0, 0);
+            int mid = size / 2;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    int dy = Mathf.Abs(y - mid);
+                    bool isShaft = x >= 4 && x < size - 6 && dy <= 1;
+                    bool isTip = x >= size - 9 && dy <= (size - 1 - x) / 2;
+                    bool isFletch = x >= 2 && x <= 7 && dy <= 3 && dy >= 1;
+                    tex.SetPixel(x, y, (isShaft || isTip || isFletch) ? Color.white : clear);
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex);
+        }
+
+        private static Sprite CreateCircleSprite(string name, int size, Color fill, Color outline)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color clear = new Color(0, 0, 0, 0);
+            float c = (size - 1) * 0.5f;
+            float r = size * 0.45f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
+                    if (d > r) tex.SetPixel(x, y, clear);
+                    else if (outline.a > 0f && d > r - 2.5f) tex.SetPixel(x, y, outline);
+                    else tex.SetPixel(x, y, fill);
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex);
+        }
+
+        private static Sprite CreateRingSprite(string name, int size, int thickness)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color clear = new Color(0, 0, 0, 0);
+            float c = (size - 1) * 0.5f;
+            float outer = size * 0.47f;
+            float inner = outer - thickness;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
+                    tex.SetPixel(x, y, (d <= outer && d >= inner) ? Color.white : clear);
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex, pixelsPerUnit: 64f);
+        }
+
+        private static Sprite CreateDiamondSprite(string name, int size, Color fill)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color clear = new Color(0, 0, 0, 0);
+            float c = (size - 1) * 0.5f;
+            float r = size * 0.44f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float manhattan = Mathf.Abs(x - c) + Mathf.Abs(y - c);
+                    tex.SetPixel(x, y, manhattan <= r ? fill : clear);
+                }
+            }
+            tex.Apply();
+            return SaveAndLoadSprite(name, tex);
+        }
+
+        #endregion
+
+        #region Project Settings Helpers
+
+        private static void RegisterSceneInBuildSettings(string scenePath)
+        {
+            var existing = EditorBuildSettings.scenes;
+            foreach (var s in existing)
+            {
+                if (s.path == scenePath)
+                {
+                    s.enabled = true;
+                    EditorBuildSettings.scenes = existing;
+                    return;
+                }
+            }
+
+            var updated = new EditorBuildSettingsScene[existing.Length + 1];
+            updated[0] = new EditorBuildSettingsScene(scenePath, true);
+            for (int i = 0; i < existing.Length; i++)
+            {
+                updated[i + 1] = existing[i];
+            }
+            EditorBuildSettings.scenes = updated;
         }
 
         private static void EnsureTagExists(string tag)
@@ -354,5 +689,7 @@ namespace ArcherCraftor.Editor
             GraphicsSettings.defaultRenderPipeline = urpAsset;
             QualitySettings.renderPipeline = urpAsset;
         }
+
+        #endregion
     }
 }

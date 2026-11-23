@@ -1,31 +1,48 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ArcherCraftor.Player;
 
 namespace ArcherCraftor.Vision
 {
+    /// <summary>
+    /// 《Escape from Duckov》 스타일 2D XY 평면 시야각(FOV) 원뿔 메시 및 장애물 그림자 생성기
+    /// </summary>
     [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
     public class FieldOfView : MonoBehaviour
     {
-        [Header("FOV Settings")]
-        [SerializeField] private float viewRadius = 16f;
-        [Range(0, 360)]
+        [Header("FOV Settings (2D XY)")]
+        [SerializeField] private float viewRadius = 15f;
+        [Range(0f, 360f)]
         [SerializeField] private float viewAngle = 100f;
         [SerializeField] private LayerMask obstacleLayer;
-        [SerializeField] private float meshResolution = 1.0f; // 도당 레이캐스트 개수
+        [SerializeField] private float meshResolution = 1.0f;
         [SerializeField] private int edgeResolveIterations = 4;
         [SerializeField] private float edgeDstThreshold = 0.5f;
 
         private Mesh viewMesh;
         private MeshFilter viewMeshFilter;
+        private PlayerController playerController;
+
+        private readonly List<Vector3> viewPoints = new List<Vector3>(128);
+        private Vector3[] vertices = System.Array.Empty<Vector3>();
+        private int[] triangles = System.Array.Empty<int>();
 
         public float ViewRadius => viewRadius;
         public float ViewAngle => viewAngle;
 
         private void Start()
         {
-            viewMesh = new Mesh { name = "FOV_Mesh" };
+            viewMesh = new Mesh { name = "FOV_2D_Mesh" };
             viewMeshFilter = GetComponent<MeshFilter>();
             viewMeshFilter.mesh = viewMesh;
+
+            playerController = GetComponentInParent<PlayerController>();
+
+            if (TryGetComponent<MeshRenderer>(out var mr))
+            {
+                mr.sortingLayerName = "FOV";
+                mr.sortingOrder = 0;
+            }
         }
 
         private void LateUpdate()
@@ -35,14 +52,16 @@ namespace ArcherCraftor.Vision
 
         private void DrawFieldOfView()
         {
-            int stepCount = Mathf.RoundToInt(viewAngle * meshResolution);
+            int stepCount = Mathf.Max(4, Mathf.RoundToInt(viewAngle * meshResolution));
             float stepAngleSize = viewAngle / stepCount;
-            List<Vector3> viewPoints = new List<Vector3>();
-            ViewCastInfo oldViewCast = new ViewCastInfo();
+            float baseAimAngle = playerController != null ? playerController.AimAngleDegrees : 0f;
+
+            viewPoints.Clear();
+            ViewCastInfo oldViewCast = default;
 
             for (int i = 0; i <= stepCount; i++)
             {
-                float angle = transform.eulerAngles.y - viewAngle / 2 + stepAngleSize * i;
+                float angle = baseAimAngle - viewAngle * 0.5f + stepAngleSize * i;
                 ViewCastInfo newViewCast = ViewCast(angle);
 
                 if (i > 0)
@@ -61,19 +80,29 @@ namespace ArcherCraftor.Vision
             }
 
             int vertexCount = viewPoints.Count + 1;
-            Vector3[] vertices = new Vector3[vertexCount];
-            int[] triangles = new int[(vertexCount - 2) * 3];
+            int triangleIndexCount = Mathf.Max(0, (vertexCount - 2) * 3);
 
-            vertices[0] = Vector3.zero; // 로컬 중심
+            if (vertices.Length != vertexCount)
+            {
+                vertices = new Vector3[vertexCount];
+            }
+            if (triangles.Length != triangleIndexCount)
+            {
+                triangles = new int[triangleIndexCount];
+            }
+
+            vertices[0] = Vector3.zero;
             for (int i = 0; i < vertexCount - 1; i++)
             {
                 vertices[i + 1] = transform.InverseTransformPoint(viewPoints[i]);
+                vertices[i + 1].z = 0f;
 
                 if (i < vertexCount - 2)
                 {
                     triangles[i * 3] = 0;
-                    triangles[i * 3 + 1] = i + 1;
-                    triangles[i * 3 + 2] = i + 2;
+                    // XY 평면(Z = -10 카메라 방향)에서 앞면이 보이도록 시계 방향 감기
+                    triangles[i * 3 + 1] = i + 2;
+                    triangles[i * 3 + 2] = i + 1;
                 }
             }
 
@@ -92,7 +121,7 @@ namespace ArcherCraftor.Vision
 
             for (int i = 0; i < edgeResolveIterations; i++)
             {
-                float angle = (minAngle + maxAngle) / 2;
+                float angle = (minAngle + maxAngle) * 0.5f;
                 ViewCastInfo newViewCast = ViewCast(angle);
 
                 bool edgeDstThresholdExceeded = Mathf.Abs(minViewCast.dst - newViewCast.dst) > edgeDstThreshold;
@@ -113,26 +142,24 @@ namespace ArcherCraftor.Vision
 
         private ViewCastInfo ViewCast(float globalAngle)
         {
-            Vector3 dir = DirFromAngle(globalAngle, true);
-            Vector3 origin = transform.position + Vector3.up * 0.5f;
+            Vector2 dir = DirFromAngle2D(globalAngle);
+            Vector2 origin = transform.position;
+            int mask = obstacleLayer.value != 0 ? obstacleLayer.value : Physics2D.DefaultRaycastLayers;
 
-            if (Physics.Raycast(origin, dir, out RaycastHit hit, viewRadius, obstacleLayer.value != 0 ? obstacleLayer : ~0))
+            RaycastHit2D hit = Physics2D.Raycast(origin, dir, viewRadius, mask);
+            if (hit.collider != null && (obstacleLayer.value != 0 || hit.collider.CompareTag("Obstacle")))
             {
-                return new ViewCastInfo(true, hit.point, hit.distance, globalAngle);
+                return new ViewCastInfo(true, new Vector3(hit.point.x, hit.point.y, 0f), hit.distance, globalAngle);
             }
-            else
-            {
-                return new ViewCastInfo(false, origin + dir * viewRadius, viewRadius, globalAngle);
-            }
+
+            Vector2 endPoint = origin + dir * viewRadius;
+            return new ViewCastInfo(false, new Vector3(endPoint.x, endPoint.y, 0f), viewRadius, globalAngle);
         }
 
-        public Vector3 DirFromAngle(float angleInDegrees, bool isGlobal)
+        public static Vector2 DirFromAngle2D(float angleInDegrees)
         {
-            if (!isGlobal)
-            {
-                angleInDegrees += transform.eulerAngles.y;
-            }
-            return new Vector3(Mathf.Sin(angleInDegrees * Mathf.Deg2Rad), 0, Mathf.Cos(angleInDegrees * Mathf.Deg2Rad));
+            float rad = angleInDegrees * Mathf.Deg2Rad;
+            return new Vector2(Mathf.Cos(rad), Mathf.Sin(rad));
         }
 
         public struct ViewCastInfo

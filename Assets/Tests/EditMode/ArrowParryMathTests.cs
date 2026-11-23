@@ -1,4 +1,4 @@
-﻿using NUnit.Framework;
+using NUnit.Framework;
 using UnityEngine;
 
 namespace ArcherCraftor.Tests.EditMode
@@ -6,10 +6,8 @@ namespace ArcherCraftor.Tests.EditMode
     [TestFixture]
     public class ArrowParryMathTests
     {
-        // 탄막 상쇄(Counter-Shot) 핵심 거리 판정 수식 검증
-        // 화살과 탄환 간의 중심 거리 <= (화살 자석 반경 + 탄환 히트박스 반경)
-
-        private static bool IsInParryRange(Vector3 arrowPos, float arrowParryRadius, Vector3 bulletPos, float bulletRadius)
+        // 2D XY 평면 기준 탄막 상쇄(Counter-Shot) 거리 판정 수식 검증
+        private static bool IsInParryRange2D(Vector2 arrowPos, float arrowParryRadius, Vector2 bulletPos, float bulletRadius)
         {
             float maxDistance = arrowParryRadius + bulletRadius;
             float sqrDist = (arrowPos - bulletPos).sqrMagnitude;
@@ -19,42 +17,38 @@ namespace ArcherCraftor.Tests.EditMode
         [Test]
         public void BulletInsideMagneticRadius_IsIntercepted()
         {
-            Vector3 arrowPos = new Vector3(5f, 0f, 5f);
+            Vector2 arrowPos = new Vector2(5f, 5f);
             float arrowParryRadius = 0.8f;
 
-            Vector3 bulletPos = new Vector3(5.5f, 0f, 5.2f); // 거리 약 0.538m
+            Vector2 bulletPos = new Vector2(5.5f, 5.2f); // 거리 약 0.538m
             float bulletRadius = 0.3f;
 
-            bool parried = IsInParryRange(arrowPos, arrowParryRadius, bulletPos, bulletRadius);
+            bool parried = IsInParryRange2D(arrowPos, arrowParryRadius, bulletPos, bulletRadius);
             Assert.IsTrue(parried, "자석 반경(0.8) + 탄환 반경(0.3) = 1.1m 내의 탄환은 상쇄되어야 함");
         }
 
         [Test]
         public void BulletOutsideMagneticRadius_IsNotIntercepted()
         {
-            Vector3 arrowPos = new Vector3(5f, 0f, 5f);
+            Vector2 arrowPos = new Vector2(5f, 5f);
             float arrowParryRadius = 0.8f;
 
-            Vector3 bulletPos = new Vector3(7f, 0f, 5f); // 거리 2.0m
+            Vector2 bulletPos = new Vector2(7f, 5f); // 거리 2.0m
             float bulletRadius = 0.3f;
 
-            bool parried = IsInParryRange(arrowPos, arrowParryRadius, bulletPos, bulletRadius);
+            bool parried = IsInParryRange2D(arrowPos, arrowParryRadius, bulletPos, bulletRadius);
             Assert.IsFalse(parried, "범위 밖의 탄환은 상쇄 판정을 받지 않아야 함");
         }
 
         [Test]
-        public void VerticalDifference_MaintainsQuarterViewPlaneCheck()
+        public void DiagonalDistance2D_RespectsExactBoundary()
         {
-            Vector3 arrowPos = new Vector3(0f, 1f, 0f);
+            Vector2 arrowPos = Vector2.zero;
             float arrowParryRadius = 0.8f;
+            float bulletRadius = 0.2f; // 합산 반경 = 1.0f
 
-            // 쿼터뷰 2D 평면 투영 거리 체크 (Y축 무시 시 동일 위치)
-            Vector3 bulletPos = new Vector3(0.2f, 1.1f, 0.3f);
-            float bulletRadius = 0.2f;
-
-            bool parried = IsInParryRange(arrowPos, arrowParryRadius, bulletPos, bulletRadius);
-            Assert.IsTrue(parried);
+            Assert.IsTrue(IsInParryRange2D(arrowPos, arrowParryRadius, new Vector2(0.7f, 0.7f), bulletRadius)); // sqrt(0.98) < 1.0
+            Assert.IsFalse(IsInParryRange2D(arrowPos, arrowParryRadius, new Vector2(0.8f, 0.8f), bulletRadius)); // sqrt(1.28) > 1.0
         }
     }
 }
-

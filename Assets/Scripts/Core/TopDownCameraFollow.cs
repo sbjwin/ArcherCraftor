@@ -2,46 +2,60 @@ using UnityEngine;
 
 namespace ArcherCraftor.Core
 {
+    /// <summary>
+    /// 2D 직교(Orthographic) 탑다운 카메라 추적 + 마우스 조준 방향 Aim Peek
+    /// </summary>
+    [RequireComponent(typeof(Camera))]
     public class TopDownCameraFollow : MonoBehaviour
     {
-        [Header("Target & Offset")]
+        [Header("Target & 2D Offset")]
         [SerializeField] private Transform target;
-        [SerializeField] private Vector3 offset = new Vector3(0f, 16f, -10f); // 약 60도 쿼터뷰 앵글
-        [SerializeField] private float smoothSpeed = 8f;
+        [SerializeField] private float cameraZ = -10f;
+        [SerializeField] private float orthographicSize = 8.5f;
+        [SerializeField] private float smoothSpeed = 9f;
 
         [Header("Aim Peek (조준 방향 시야 확장)")]
         [Tooltip("마우스 커서 방향으로 카메라를 살짝 이동시키는 배율")]
-        [SerializeField] private float aimPeekMultiplier = 0.25f;
-        [SerializeField] private float maxPeekDistance = 4.0f;
+        [SerializeField] private float aimPeekMultiplier = 0.22f;
+        [SerializeField] private float maxPeekDistance = 3.5f;
 
+        private Camera cam;
         private Vector3 currentVelocity;
 
-        private void LateUpdate()
+        private void Awake()
+        {
+            cam = GetComponent<Camera>();
+            cam.orthographic = true;
+            cam.orthographicSize = orthographicSize;
+        }
+
+        private void Start()
         {
             if (target == null)
             {
                 GameObject player = GameObject.FindGameObjectWithTag("Player");
                 if (player != null) target = player.transform;
-                return;
             }
+        }
 
-            Vector3 desiredPosition = target.position + offset;
+        private void LateUpdate()
+        {
+            if (target == null) return;
 
-            // Aim Peek 계산 (마우스 커서 방향 반영)
-            Ray ray = Camera.main != null ? Camera.main.ScreenPointToRay(Input.mousePosition) : default;
-            Plane groundPlane = new Plane(Vector3.up, target.position);
+            Vector3 desiredPosition = new Vector3(target.position.x, target.position.y, cameraZ);
 
-            if (groundPlane.Raycast(ray, out float distance))
+            if (cam != null)
             {
-                Vector3 mouseWorldPoint = ray.GetPoint(distance);
-                Vector3 aimOffset = (mouseWorldPoint - target.position) * aimPeekMultiplier;
-                aimOffset = Vector3.ClampMagnitude(aimOffset, maxPeekDistance);
-                desiredPosition += new Vector3(aimOffset.x, 0f, aimOffset.z);
+                Vector3 mouseScreen = Input.mousePosition;
+                mouseScreen.z = Mathf.Abs(cameraZ);
+                Vector3 mouseWorld = cam.ScreenToWorldPoint(mouseScreen);
+                Vector2 aimOffset = ((Vector2)mouseWorld - (Vector2)target.position) * aimPeekMultiplier;
+                aimOffset = Vector2.ClampMagnitude(aimOffset, maxPeekDistance);
+                desiredPosition.x += aimOffset.x;
+                desiredPosition.y += aimOffset.y;
             }
 
-            // 부드러운 카메라 이동
             transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref currentVelocity, 1f / smoothSpeed);
-            transform.LookAt(target.position + Vector3.up * 1.0f);
         }
     }
 }

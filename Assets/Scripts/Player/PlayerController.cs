@@ -1,46 +1,77 @@
 using UnityEngine;
+using ArcherCraftor.Combat;
+using ArcherCraftor.Crafting;
 
 namespace ArcherCraftor.Player
 {
-    [RequireComponent(typeof(CharacterController))]
+    /// <summary>
+    /// 2D 탑다운(XY 평면) 플레이어 이동, 대시 무적, 360도 마우스 조준 및 활 파츠/화살통 발광 제어기
+    /// </summary>
+    [RequireComponent(typeof(Rigidbody2D), typeof(CircleCollider2D))]
     public class PlayerController : MonoBehaviour
     {
-        [Header("Movement")]
+        [Header("Movement (2D XY)")]
         [SerializeField] private float moveSpeed = 6.5f;
-        [SerializeField] private float dashSpeed = 16f;
+        [SerializeField] private float dashSpeed = 16.5f;
         [SerializeField] private float dashDuration = 0.2f;
-        [SerializeField] private float dashCooldown = 1.0f;
+        [SerializeField] private float dashCooldown = 0.9f;
 
-        [Header("Melee Kick / Knockback (초근접 대처)")]
-        [SerializeField] private float kickRadius = 2.2f;
-        [SerializeField] private float kickKnockbackForce = 12f;
-        [SerializeField] private float kickDamage = 15f;
-        [SerializeField] private float kickCooldown = 1.2f;
+        [Header("Enter-the-Gungeon Style Parts")]
+        [Tooltip("좌우 반전만 수행하는 몸체 스프라이트")]
+        [SerializeField] private SpriteRenderer bodyRenderer;
+        [Tooltip("마우스 커서를 따라 360도 독립 회전하는 활 피벗")]
+        [SerializeField] private Transform bowPivot;
+        [Tooltip("조준 상/하 방향에 따라 정렬 순서를 바꿀 활 스프라이트")]
+        [SerializeField] private SpriteRenderer bowRenderer;
+        [Tooltip("현재 선택된 특수 화살 색상으로 발광하는 등 뒤 화살통 표시기")]
+        [SerializeField] private SpriteRenderer quiverGlowRenderer;
+        [SerializeField] private int bodyBaseSortingOrder = 10;
 
-        [Header("Layers")]
-        [SerializeField] private LayerMask groundLayer;
-        [SerializeField] private LayerMask enemyLayer;
-
-        private CharacterController controller;
+        private Rigidbody2D rb;
+        private Health playerHealth;
         private Camera mainCamera;
-        private Vector3 moveInput;
-        private Vector3 aimPoint;
+
+        private Vector2 moveInput;
+        private Vector2 aimPoint;
+        private Vector2 aimDirection = Vector2.right;
+        private Vector2 dashDirection = Vector2.right;
 
         private float speedMultiplier = 1.0f;
         private float dashTimer;
         private float dashCooldownTimer;
-        private float kickCooldownTimer;
         private bool isDashing;
-        private Vector3 dashDirection;
 
-        public Vector3 AimDirection { get; private set; }
-        public Vector3 AimWorldPosition => aimPoint;
+        public Vector2 AimDirection => aimDirection;
+        public Vector2 AimWorldPosition => aimPoint;
+        public float AimAngleDegrees => Mathf.Atan2(aimDirection.y, aimDirection.x) * Mathf.Rad2Deg;
         public bool IsDashing => isDashing;
 
         private void Awake()
         {
-            controller = GetComponent<CharacterController>();
+            rb = GetComponent<Rigidbody2D>();
+            rb.gravityScale = 0f;
+            rb.freezeRotation = true;
+            rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+
+            playerHealth = GetComponent<Health>();
             mainCamera = Camera.main;
+        }
+
+        private void Start()
+        {
+            if (FieldCraftingManager.Instance != null)
+            {
+                FieldCraftingManager.Instance.OnSelectedArrowChanged += UpdateQuiverGlow;
+                UpdateQuiverGlow(FieldCraftingManager.Instance.SelectedSpecialArrow);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (FieldCraftingManager.Instance != null)
+            {
+                FieldCraftingManager.Instance.OnSelectedArrowChanged -= UpdateQuiverGlow;
+            }
         }
 
         private void Update()
@@ -52,29 +83,23 @@ namespace ArcherCraftor.Player
 
             HandleInput();
             HandleAimRotation();
+        }
+
+        private void FixedUpdate()
+        {
             HandleMovement();
-            HandleMeleeKick();
         }
 
         private void HandleInput()
         {
-            // 이동 입력
             float horizontal = Input.GetAxisRaw("Horizontal");
             float vertical = Input.GetAxisRaw("Vertical");
-            moveInput = new Vector3(horizontal, 0f, vertical).normalized;
+            moveInput = new Vector2(horizontal, vertical).normalized;
 
-            // 대시 / 회피 입력 (Space)
             dashCooldownTimer -= Time.deltaTime;
             if (Input.GetKeyDown(KeyCode.Space) && dashCooldownTimer <= 0f && !isDashing)
             {
                 StartDash();
-            }
-
-            // 근접 발차기/밀쳐내기 입력 (F키 또는 마우스 우클릭)
-            kickCooldownTimer -= Time.deltaTime;
-            if ((Input.GetKeyDown(KeyCode.F) || Input.GetMouseButtonDown(1)) && kickCooldownTimer <= 0f)
-            {
-                PerformMeleeKick();
             }
         }
 
@@ -82,21 +107,36 @@ namespace ArcherCraftor.Player
         {
             if (mainCamera == null) return;
 
-            // 마우스 커서 위치를 바닥 평면(Y = 플레이어 Y)에 투영
-            Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
-            Plane groundPlane = new Plane(Vector3.up, transform.position);
+            Vector3 mouseScreen = Input.mousePosition;
+            mouseScreen.z = Mathf.Abs(mainCamera.transform.position.z - transform.position.z);
+            Vector3 worldPoint = mainCamera.ScreenToWorldPoint(mouseScreen);
 
-            if (groundPlane.Raycast(ray, out float distance))
+            aimPoint = new Vector2(worldPoint.x, worldPoint.y);
+            Vector2 dir = aimPoint - (Vector2)transform.position;
+
+            if (dir.sqrMagnitude > 0.0001f)
             {
-                aimPoint = ray.GetPoint(distance);
-                aimPoint.y = transform.position.y;
+                aimDirection = dir.normalized;
+            }
 
-                Vector3 direction = (aimPoint - transform.position).normalized;
-                if (direction.sqrMagnitude > 0.001f)
-                {
-                    AimDirection = direction;
-                    transform.forward = direction;
-                }
+            float angle = Mathf.Atan2(aimDirection.y, aimDirection.x) * Mathf.Rad2Deg;
+
+            if (bowPivot != null)
+            {
+                bowPivot.rotation = Quaternion.Euler(0f, 0f, angle);
+            }
+
+            if (bodyRenderer != null)
+            {
+                bodyRenderer.flipX = aimDirection.x < -0.05f;
+                bodyRenderer.sortingOrder = bodyBaseSortingOrder;
+            }
+
+            if (bowRenderer != null)
+            {
+                // 위쪽을 조준할 때는 몸체 뒤로, 아래쪽을 조준할 때는 몸체 앞으로 정렬
+                bowRenderer.sortingOrder = aimDirection.y > 0.25f ? bodyBaseSortingOrder - 1 : bodyBaseSortingOrder + 1;
+                bowRenderer.flipY = aimDirection.x < 0f;
             }
         }
 
@@ -104,18 +144,16 @@ namespace ArcherCraftor.Player
         {
             if (isDashing)
             {
-                controller.Move(dashDirection * (dashSpeed * Time.deltaTime));
-                dashTimer -= Time.deltaTime;
+                rb.linearVelocity = dashDirection * dashSpeed;
+                dashTimer -= Time.fixedDeltaTime;
                 if (dashTimer <= 0f)
                 {
-                    isDashing = false;
+                    EndDash();
                 }
                 return;
             }
 
-            Vector3 velocity = moveInput * (moveSpeed * speedMultiplier);
-            velocity.y = -9.81f; // 기본 중력
-            controller.Move(velocity * Time.deltaTime);
+            rb.linearVelocity = moveInput * (moveSpeed * speedMultiplier);
         }
 
         private void StartDash()
@@ -123,57 +161,37 @@ namespace ArcherCraftor.Player
             isDashing = true;
             dashTimer = dashDuration;
             dashCooldownTimer = dashCooldown;
-            dashDirection = moveInput.sqrMagnitude > 0.01f ? moveInput : transform.forward;
-        }
+            dashDirection = moveInput.sqrMagnitude > 0.01f ? moveInput : aimDirection;
 
-        private void HandleMeleeKick()
-        {
-            // 쿨타임 관리
-        }
-
-        private void PerformMeleeKick()
-        {
-            kickCooldownTimer = kickCooldown;
-
-            // 전방 원뿔/원형 범위 내 적 넉백
-            Vector3 kickCenter = transform.position + transform.forward * (kickRadius * 0.5f);
-            Collider[] hitEnemies = Physics.OverlapSphere(kickCenter, kickRadius, enemyLayer.value != 0 ? enemyLayer : ~0);
-
-            foreach (var col in hitEnemies)
+            if (playerHealth != null)
             {
-                if (col.gameObject == gameObject) continue;
+                playerHealth.SetInvulnerable(true);
+            }
+        }
 
-                if (col.CompareTag("Enemy") || col.GetComponent<Combat.IDamageable>() != null)
-                {
-                    // 대미지
-                    if (col.TryGetComponent<Combat.IDamageable>(out var damageable))
-                    {
-                        damageable.TakeDamage(kickDamage, col.transform.position, transform.forward);
-                    }
+        private void EndDash()
+        {
+            isDashing = false;
+            if (playerHealth != null)
+            {
+                playerHealth.SetInvulnerable(false);
+            }
+        }
 
-                    // 넉백 (Rigidbody 지원 시)
-                    if (col.TryGetComponent<Rigidbody>(out var rb))
-                    {
-                        Vector3 knockDir = (col.transform.position - transform.position).normalized;
-                        knockDir.y = 0.1f;
-                        rb.AddForce(knockDir * kickKnockbackForce, ForceMode.Impulse);
-                    }
-                }
+        private void UpdateQuiverGlow(ArrowType specialArrow)
+        {
+            if (quiverGlowRenderer != null)
+            {
+                quiverGlowRenderer.color = ArrowVisualProfile.GetArrowColor(specialArrow);
             }
         }
 
         /// <summary>
-        /// 활 차징 등에 따른 이동 속도 배율 제어 (예: 차징 중 0.5f로 감속)
+        /// 활 차징 등에 따른 이동 속도 배율 제어
         /// </summary>
         public void SetSpeedMultiplier(float multiplier)
         {
             speedMultiplier = Mathf.Clamp(multiplier, 0.1f, 1.5f);
-        }
-
-        private void OnDrawGizmosSelected()
-        {
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position + transform.forward * (kickRadius * 0.5f), kickRadius);
         }
     }
 }
