@@ -21,12 +21,36 @@
 ## 🚀 빠른 시작 가이드 (Unity Editor)
 
 1. **Unity Hub**를 실행합니다.
-2. **[열기(Open)]** 버튼을 누르고 이 폴더(`c:\Users\niji0\Desktop\ArcherCraftor`)를 선택합니다.
+2. **[열기(Open)]** 버튼을 누르고 **클론한 프로젝트 폴더**를 선택합니다.
    - 권장 에디터 버전: **Unity 6 (6000.3.22f1)** 또는 2022.3 LTS 이상
 3. 프로젝트가 로드된 후 상단 메뉴바를 확인합니다:
    - **`[ArcherCraftor] -> [Setup Prototype Sandbox Scene]`** 클릭!
 4. 클릭 한 번으로 바닥, 장애물 기둥, 궁수 플레이어, 적 골렘, 탄막/화살 프리팹, 쿼터뷰 카메라, FOV 시야각 메시, 조준선 UI가 자동으로 완벽하게 구성되어 **`Assets/Scenes/PrototypeSandbox.unity`**로 저장됩니다.
 5. 에디터 상단의 **[ ▶ Play ]** 버튼을 누르면 즉시 플레이 가능합니다!
+
+---
+
+## 📦 대용량 외부 에셋 공유 가이드 (Google Drive / ExternalAssets)
+
+GitHub Git LFS 무료 한도(월 10 GiB 스토리지 / 10 GiB 다운로드 대역폭)를 절약하기 위해 **경량 리소스만 Git LFS**로 관리하고, **무거운 에셋은 `.gitignore`로 제외된 `Assets/ExternalAssets/` 폴더**에서 구글 드라이브 공유 아카이브(`.zip`)로 동기화합니다.
+
+| 구분 | 배치 위치 | 대상 예시 |
+| :--- | :--- | :--- |
+| **Git / Git LFS 관리** | 일반 `Assets/` 하위 | 5 MB 이하 실사용 스프라이트(`.png`), 압축 사운드(`.ogg`/`.mp3`), 폰트, 씬/프리팹 |
+| **구글 드라이브 공유** | `Assets/ExternalAssets/` | 5 MB 초과 파일, 에셋 스토어 팩, 원본 작업 파일(`.psd`, `.blend`, `.mp4`), 압축 파일(`.zip`, `.unitypackage`) |
+
+```powershell
+# 1) 최초 클론 시 1회 실행: 고정 GUID로 로컬 Assets/ExternalAssets 폴더 초기화
+powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1
+
+# 2) 구글 드라이브에서 받은 zip 적용 (-CleanExtract로 이전 버전 잔존 파일 정리 후 해제)
+powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1 -ArchivePath "다운로드경로\ExternalAssets.zip" -CleanExtract
+
+# 3) 구글 드라이브 업로드용 zip 생성 (반드시 Unity 에디터에서 .meta 생성 후 실행)
+powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1 -ExportArchivePath "공유경로\ExternalAssets.zip"
+```
+
+> **중요**: 공유 `.zip`에는 반드시 **Unity가 생성한 `.meta` 파일**이 함께 포함되어야 두 개발자 PC에서 씬/프리팹의 에셋 참조(GUID)가 깨지지 않습니다. `-ExportArchivePath` 옵션을 사용하면 `.meta` 누락 여부를 점검한 뒤 함께 패키징합니다.
 
 ---
 
@@ -64,6 +88,9 @@ Assets/
 ---
 
 ## 📚 기획 및 설정 문서 (Docs)
+- [에이전트 개발 하네스 규약 (AGENTS.md)](AGENTS.md) : 프로젝트 규칙, 어셈블리 경계, 대용량 에셋(`ExternalAssets`) 분리 원칙
+- [시스템 아키텍처 문서 (ARCHITECTURE.md)](docs/ARCHITECTURE.md) : 어셈블리 계층, 이벤트 시퀀스, 테스트 전략
+- [태스크 로드맵 및 백로그 (TASKS.md)](docs/TASKS.md) : 하네스 구축 현황 및 구현 백로그
 - [게임 기획 및 컨셉 문서 (GameConcept.md)](docs/GameConcept.md) : 조작 체계, 탄막 상쇄, 현장 즉석 제작 시스템
 - [스토리 및 세계관 문서 (Story.md)](docs/Story.md) : 세계관 배경, 주인공 설정, 챕터별 서사 및 연출 방식
 

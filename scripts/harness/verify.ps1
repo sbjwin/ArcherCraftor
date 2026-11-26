@@ -1,8 +1,13 @@
 # verify.ps1 - ArcherCraftor project-wide harness verification script
-# Runs all 4 validation gates: meta integrity, asmdef syntax, C# guardrails, and test suites.
+# Runs all 5 validation gates: meta integrity, asmdef syntax, C# guardrails, test suites, and heavy asset guardrails.
+
+param (
+    [double]$MaxTrackedAssetMB = 5.0
+)
 
 $ErrorActionPreference = "Continue"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$assetsPath = Join-Path $projectRoot "Assets"
 $scriptsPath = Join-Path $projectRoot "Assets\Scripts"
 $testsPath = Join-Path $projectRoot "Assets\Tests"
 
@@ -17,7 +22,7 @@ $failedChecks = 0
 # -------------------------------------------------------------------------
 # Gate 1: Unity .meta File Integrity Check
 # -------------------------------------------------------------------------
-Write-Host "[1/4] Checking Unity .meta file integrity..." -ForegroundColor Yellow
+Write-Host "[1/5] Checking Unity .meta file integrity..." -ForegroundColor Yellow
 $metaScript = Join-Path $PSScriptRoot "check-meta.ps1"
 if (Test-Path $metaScript) {
     & powershell -ExecutionPolicy Bypass -File $metaScript
@@ -35,8 +40,8 @@ Write-Host ""
 # -------------------------------------------------------------------------
 # Gate 2: Assembly Definition (.asmdef) Validation
 # -------------------------------------------------------------------------
-Write-Host "[2/4] Checking Assembly Definitions (.asmdef)..." -ForegroundColor Yellow
-$asmdefFiles = Get-ChildItem -Path (Join-Path $projectRoot "Assets") -Recurse -Filter "*.asmdef"
+Write-Host "[2/5] Checking Assembly Definitions (.asmdef)..." -ForegroundColor Yellow
+$asmdefFiles = Get-ChildItem -Path $assetsPath -Recurse -Filter "*.asmdef"
 $asmdefError = $false
 
 foreach ($asm in $asmdefFiles) {
@@ -65,7 +70,7 @@ Write-Host ""
 # -------------------------------------------------------------------------
 # Gate 3: C# Code Static Analysis & Guardrails
 # -------------------------------------------------------------------------
-Write-Host "[3/4] C# Code Guardrail Static Analysis..." -ForegroundColor Yellow
+Write-Host "[3/5] C# Code Guardrail Static Analysis..." -ForegroundColor Yellow
 $csFiles = Get-ChildItem -Path $scriptsPath -Recurse -Filter "*.cs"
 $codeViolations = 0
 
@@ -104,7 +109,7 @@ Write-Host ""
 # -------------------------------------------------------------------------
 # Gate 4: Test Harness & Package Configuration
 # -------------------------------------------------------------------------
-Write-Host "[4/4] Checking Test Harness & Package Environment..." -ForegroundColor Yellow
+Write-Host "[4/5] Checking Test Harness & Package Environment..." -ForegroundColor Yellow
 $manifestPath = Join-Path $projectRoot "Packages\manifest.json"
 if (Test-Path $manifestPath) {
     $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
@@ -121,6 +126,58 @@ $playModeTests = Get-ChildItem -Path (Join-Path $testsPath "PlayMode") -Filter "
 Write-Host "  [OK] EditMode Test Suites: $($editModeTests.Count) files found" -ForegroundColor Gray
 Write-Host "  [OK] PlayMode Test Suites: $($playModeTests.Count) files found" -ForegroundColor Gray
 Write-Host "[OK] Test Harness structure valid" -ForegroundColor Green
+Write-Host ""
+
+# -------------------------------------------------------------------------
+# Gate 5: Heavy Assets & Git LFS Guardrails
+# -------------------------------------------------------------------------
+Write-Host "[5/5] Checking Heavy Assets & Git LFS Guardrails..." -ForegroundColor Yellow
+$externalAssetsDir = Join-Path $assetsPath "ExternalAssets"
+if (-not (Test-Path -LiteralPath $externalAssetsDir)) {
+    Write-Host "  [INFO] Local Assets/ExternalAssets folder not initialized. Run scripts/setup-external-assets.ps1" -ForegroundColor DarkGray
+}
+
+$maxBytes = [long]($MaxTrackedAssetMB * 1MB)
+$disallowedExtensions = @(
+    ".psd", ".psb", ".zip", ".7z", ".rar", ".tar", ".gz",
+    ".unitypackage", ".mp4", ".mov", ".avi", ".blend", ".max"
+)
+
+$assetCandidates = Get-ChildItem -Path $assetsPath -Recurse -File -Force | Where-Object {
+    if ($_.Extension -ieq ".meta") { return $false }
+    $relInAssets = $_.FullName.Substring($assetsPath.Length).TrimStart('\', '/')
+    $segments = $relInAssets -split '[\\/]'
+    if ($segments.Length -gt 0 -and ($segments[0] -ieq "ExternalAssets" -or $segments[0] -like "AssetStoreTools*")) {
+        return $false
+    }
+    foreach ($seg in $segments) {
+        if ($seg.StartsWith('.')) { return $false }
+    }
+    return $true
+}
+
+$assetViolations = 0
+foreach ($assetFile in $assetCandidates) {
+    $relPath = $assetFile.FullName.Substring($projectRoot.Length + 1)
+    $ext = $assetFile.Extension.ToLowerInvariant()
+
+    if ($disallowedExtensions -contains $ext) {
+        Write-Host "  [VIOLATION: Source/Archive Asset Outside ExternalAssets] $relPath" -ForegroundColor Red
+        $assetViolations++
+    } elseif ($assetFile.Length -gt $maxBytes) {
+        $sizeMB = [math]::Round($assetFile.Length / 1MB, 2)
+        Write-Host "  [VIOLATION: Heavy Asset Outside ExternalAssets] $relPath ($sizeMB MB > $MaxTrackedAssetMB MB)" -ForegroundColor Red
+        $assetViolations++
+    }
+}
+
+if ($assetViolations -gt 0) {
+    Write-Host "  Move heavy/source assets to Assets/ExternalAssets/ and share via Google Drive archive (scripts/setup-external-assets.ps1)." -ForegroundColor Yellow
+    Write-Host "[FAIL] Found $assetViolations heavy/source asset violations" -ForegroundColor Red
+    $failedChecks++
+} else {
+    Write-Host "[OK] Heavy asset guardrail passed ($($assetCandidates.Count) asset files checked, limit: $MaxTrackedAssetMB MB)" -ForegroundColor Green
+}
 Write-Host ""
 
 # -------------------------------------------------------------------------

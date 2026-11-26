@@ -38,6 +38,7 @@
 
 ```
 Assets/
+├── ExternalAssets/                       # [Git 제외] 대용량 외부 에셋/원본 파일 (구글 드라이브 공유)
 ├── Scripts/
 │   ├── ArcherCraftor.Runtime.asmdef      # 런타임 게임 시스템 루트 어셈블리
 │   ├── Combat/                           # 투사체, 대미지, 탄막 상쇄, 체력
@@ -81,6 +82,12 @@ Assets/
    - 물리 쿼리는 `Physics.OverlapSphereNonAlloc` 형태를 권장합니다.
 4. **이벤트 기반 디커플링 (Event-Driven Decoupling)**:
    - UI와 Combat, Player 사이는 직접 참조 대신 `System.Action` 이벤트를 통해 결합도를 낮춥니다. (예: `OnHealthChanged`, `OnChargeUpdated`)
+5. **대용량 에셋 및 Git LFS 관리 원칙 (`ExternalAssets` 분리)**:
+   - Git LFS 무료 할당량(월 10 GiB 스토리지 / 10 GiB 다운로드 대역폭, `upstream` 소유자 계정 기준 합산)을 보호하기 위해 무거운 바이너리를 Git/LFS에 직접 커밋하지 마십시오.
+   - **Git / Git LFS 허용**: 5 MB 이하의 게임 실사용 최적화 리소스(`.png`, `.ogg`/`.mp3`, 폰트 등) 및 텍스트 에셋(`.unity`, `.prefab`, `.mat`, `.asset`).
+   - **`Assets/ExternalAssets/` 분리 필수 (`.gitignore` 제외, 구글 드라이브 공유)**: 5 MB 초과 파일, 에셋 스토어 팩, 원본 작업 파일(`.psd`, `.psb`, `.blend`, `.max`, `.mp4`, `.mov`), 압축 아카이브(`.zip`, `.7z`, `.unitypackage`).
+   - 신규 클론 시 반드시 `scripts/setup-external-assets.ps1`을 실행하여 고정 GUID(`e8f0a1b2c3d44e5f8a9b0c1d2e3f4a5b`)로 `Assets/ExternalAssets` 폴더를 초기화해야 합니다.
+   - 구글 드라이브 공유 아카이브를 만들 때는 **Unity가 생성한 내부 `.meta` 파일까지 반드시 함께 패키징**(`-ExportArchivePath`)해야 팀원 간 GUID 참조가 깨지지 않습니다.
 
 ---
 
@@ -89,14 +96,19 @@ Assets/
 코드 변경 후에는 반드시 하네스 검증 스크립트를 실행하여 정합성을 확인합니다:
 
 ```powershell
-# 1. 메타 파일 및 프로젝트 무결성 점검
+# 1. 메타 파일 및 프로젝트 무결성/대용량 에셋 가드레일 점검
 powershell -ExecutionPolicy Bypass -File scripts/harness/verify.ps1
 
-# 2. 메타 파일 정합성 전용 검사
+# 2. 메타 파일 정합성 전용 검사 (ExternalAssets 포함 검사 시 -IncludeExternalAssets 추가)
 powershell -ExecutionPolicy Bypass -File scripts/harness/check-meta.ps1
 
 # 3. 유니티 테스트 실행 (에디터 연동 시)
 powershell -ExecutionPolicy Bypass -File scripts/harness/run-tests.ps1
+
+# 4. 외부 대용량 에셋 폴더 초기화 / 구글 드라이브 압축 해제 / 내보내기
+powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1
+powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1 -ArchivePath "경로\ExternalAssets.zip" -CleanExtract
+powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1 -ExportArchivePath "경로\ExternalAssets.zip"
 ```
 
 ---

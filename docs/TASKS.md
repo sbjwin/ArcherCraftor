@@ -1,4 +1,4 @@
-﻿# ArcherCraftor - 작업 현황 및 로드맵 (TASKS.md)
+# ArcherCraftor - 작업 현황 및 로드맵 (TASKS.md)
 
 > ArcherCraftor 프로젝트의 하네스 구축 현황, 구현 백로그 및 품질 검증 상태입니다.
 
@@ -25,9 +25,10 @@
   - [x] `Assets/Tests/PlayMode/ArcherCraftor.Tests.PlayMode.asmdef` 생성
   - [x] `Assets/Tests/PlayMode/ArrowFlightPlayModeTests.cs` (투사체 이동 통합 테스트)
 - [x] **자동화 검증 스크립트 (Automation Scripts)**
-  - [x] `scripts/harness/check-meta.ps1` (.meta 파일 무결성 및 자동 복구 도구)
-  - [x] `scripts/harness/verify.ps1` (프로젝트 전역 하네스 게이트 검증기)
+  - [x] `scripts/harness/check-meta.ps1` (.meta 파일 무결성 및 자동 복구 도구, `ExternalAssets` 선택 검사 지원)
+  - [x] `scripts/harness/verify.ps1` (프로젝트 전역 5단계 하네스 게이트 검증기: `.meta`, `.asmdef`, C# 가드레일, 테스트 환경, 대용량/원본 에셋 차단)
   - [x] `scripts/harness/run-tests.ps1` (배치모드 UTF 테스트 실행기)
+  - [x] `scripts/setup-external-assets.ps1` (`Assets/ExternalAssets` 고정 GUID 초기화 및 구글 드라이브 `.zip` 추출/`.meta` 포함 내보내기 도구)
 - [x] **문서화 하네스 (Documentation Harness)**
   - [x] `docs/ARCHITECTURE.md` (아키텍처 계층, 이벤트 시퀀스, 다이어그램)
   - [x] `docs/TASKS.md` (태스크 보드 및 검증 상태)

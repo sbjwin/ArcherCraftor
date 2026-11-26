@@ -1,11 +1,53 @@
-# setup-external-assets.ps1 - Prepare local Assets/ExternalAssets folder and optionally extract a shared archive
-# Allows sharing heavy assets (video, PSD, audio packs) via manual zip archives without Git LFS or cloud sync locks.
+# setup-external-assets.ps1 - Manage local Assets/ExternalAssets folder and shared archive import/export
+# Allows sharing heavy assets (video, PSD, audio packs, asset store packages) via Google Drive zip archives without Git LFS bloat.
 
 param (
-    [string]$ArchivePath = ""
+    [string]$ArchivePath = "",
+    [switch]$CleanExtract = $false,
+    [string]$ExportArchivePath = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-IgnoredAssetSegment {
+    param ([string]$Segment)
+    return ($Segment.StartsWith('.') -or $Segment.EndsWith('~') -or $Segment -ieq 'desktop.ini' -or $Segment -ieq 'Thumbs.db')
+}
+
+function Get-MissingMetaRelativePaths {
+    param (
+        [string]$BaseDir,
+        [string]$RootDir
+    )
+
+    $missing = @()
+    if (-not (Test-Path -LiteralPath $BaseDir)) {
+        return $missing
+    }
+
+    $items = Get-ChildItem -LiteralPath $BaseDir -Recurse -Force | Where-Object {
+        if ($_.Extension -eq ".meta") { return $false }
+        $rel = $_.FullName.Substring($BaseDir.Length).TrimStart('\', '/')
+        $segments = $rel -split '[\\/]'
+        foreach ($seg in $segments) {
+            if (Test-IgnoredAssetSegment -Segment $seg) { return $false }
+        }
+        return $true
+    }
+
+    foreach ($item in $items) {
+        if (-not (Test-Path -LiteralPath ($item.FullName + ".meta"))) {
+            $missing += $item.FullName.Substring($RootDir.Length + 1)
+        }
+    }
+
+    return $missing
+}
+
+if (-not [string]::IsNullOrWhiteSpace($ArchivePath) -and -not [string]::IsNullOrWhiteSpace($ExportArchivePath)) {
+    Write-Error "Specify either -ArchivePath or -ExportArchivePath, not both."
+    exit 1
+}
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $assetsDir = Join-Path $projectRoot "Assets"
@@ -23,7 +65,10 @@ if (-not (Test-Path -LiteralPath $assetsDir)) {
 Write-Host "=== ArcherCraftor ExternalAssets Setup ===" -ForegroundColor Cyan
 Write-Host "Local Folder : $linkPath" -ForegroundColor DarkGray
 if (-not [string]::IsNullOrWhiteSpace($ArchivePath)) {
-    Write-Host "Archive File : $ArchivePath" -ForegroundColor DarkGray
+    Write-Host "Import Zip   : $ArchivePath (CleanExtract: $CleanExtract)" -ForegroundColor DarkGray
+}
+if (-not [string]::IsNullOrWhiteSpace($ExportArchivePath)) {
+    Write-Host "Export Zip   : $ExportArchivePath" -ForegroundColor DarkGray
 }
 
 # 1. Remove legacy NTFS Junction safely without touching remote target data, then ensure normal local folder
@@ -76,9 +121,69 @@ if (-not [string]::IsNullOrWhiteSpace($ArchivePath)) {
         exit 1
     }
 
+    if ($CleanExtract) {
+        Write-Host "Cleaning existing contents inside $linkPath..." -ForegroundColor Yellow
+        Get-ChildItem -LiteralPath $linkPath -Force | Remove-Item -Recurse -Force
+    }
+
     Write-Host "Extracting archive into $linkPath..." -ForegroundColor Cyan
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $linkPath -Force
     Write-Host "[EXTRACTED] $ArchivePath -> $linkPath" -ForegroundColor Green
+
+    $missingAfterExtract = Get-MissingMetaRelativePaths -BaseDir $linkPath -RootDir $projectRoot
+    if ($missingAfterExtract.Count -gt 0) {
+        Write-Host "[WARN] Some extracted assets are missing .meta files ($($missingAfterExtract.Count) items). Open Unity or ensure shared archives include .meta files to avoid GUID mismatches." -ForegroundColor Yellow
+    }
+}
+
+# 4. Export Assets/ExternalAssets (including .meta files) to a zip archive for Google Drive sharing
+if (-not [string]::IsNullOrWhiteSpace($ExportArchivePath)) {
+    $packCandidates = Get-ChildItem -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -ine 'desktop.ini' -and $_.Name -ine 'Thumbs.db' -and $_.Name -ine '.DS_Store'
+    }
+
+    if ($null -eq $packCandidates -or $packCandidates.Count -eq 0) {
+        Write-Error "No files found inside '$linkPath' to export."
+        exit 1
+    }
+
+    $missingBeforeExport = Get-MissingMetaRelativePaths -BaseDir $linkPath -RootDir $projectRoot
+    if ($missingBeforeExport.Count -gt 0) {
+        Write-Host "[WARN] Missing .meta files detected inside Assets/ExternalAssets ($($missingBeforeExport.Count) items):" -ForegroundColor Yellow
+        foreach ($m in ($missingBeforeExport | Select-Object -First 10)) {
+            Write-Host "  - $m" -ForegroundColor Yellow
+        }
+        Write-Host "[WARN] Open the Unity Editor once so Unity generates .meta files before re-exporting, otherwise teammates may see broken GUID references." -ForegroundColor Yellow
+    }
+
+    $exportParent = Split-Path -Path $ExportArchivePath -Parent
+    if (-not [string]::IsNullOrWhiteSpace($exportParent) -and -not (Test-Path -LiteralPath $exportParent)) {
+        New-Item -ItemType Directory -Path $exportParent -Force | Out-Null
+    }
+
+    $stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ArcherCraftor_ExtExport_" + [System.Guid]::NewGuid().ToString("N"))
+    try {
+        New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+        foreach ($entry in $packCandidates) {
+            Copy-Item -LiteralPath $entry.FullName -Destination $stagingDir -Recurse -Force
+        }
+
+        # Remove OS metadata files recursively from staging copy before archiving
+        Get-ChildItem -LiteralPath $stagingDir -Recurse -Force | Where-Object {
+            $_.Name -ieq 'desktop.ini' -or $_.Name -ieq 'Thumbs.db' -or $_.Name -ieq '.DS_Store'
+        } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+        $stagingItems = Join-Path $stagingDir "*"
+        if (Test-Path -LiteralPath $ExportArchivePath) {
+            Remove-Item -LiteralPath $ExportArchivePath -Force
+        }
+        Compress-Archive -Path $stagingItems -DestinationPath $ExportArchivePath -CompressionLevel Optimal -Force
+        Write-Host "[EXPORTED] $linkPath -> $ExportArchivePath" -ForegroundColor Green
+    } finally {
+        if (Test-Path -LiteralPath $stagingDir) {
+            Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Write-Host "----------------------------------------" -ForegroundColor DarkGray
