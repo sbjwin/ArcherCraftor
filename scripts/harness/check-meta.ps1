@@ -3,8 +3,7 @@
 
 param (
     [string]$AssetsPath = "Assets",
-    [switch]$FixMissing = $false,
-    [switch]$IncludeExternalAssets = $false
+    [switch]$FixMissing = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,11 +18,6 @@ if (-not (Test-Path $targetAssets)) {
 Write-Host "=== Unity .meta Integrity Check ===" -ForegroundColor Cyan
 Write-Host "Target: $targetAssets" -ForegroundColor DarkGray
 
-$externalAssetsDir = Join-Path $targetAssets "ExternalAssets"
-if (-not $IncludeExternalAssets -and (Test-Path -LiteralPath $externalAssetsDir)) {
-    Write-Host "[INFO] Skipping git-ignored Assets/ExternalAssets (use -IncludeExternalAssets to validate it)" -ForegroundColor DarkGray
-}
-
 $missingMetaCount = 0
 $orphanedMetaCount = 0
 
@@ -32,9 +26,6 @@ $items = Get-ChildItem -Path $targetAssets -Recurse | Where-Object {
     if ($_.Extension -eq ".meta") { return $false }
     $rel = $_.FullName.Substring($targetAssets.Length).TrimStart('\', '/')
     $segments = $rel -split '[\\/]'
-    if (-not $IncludeExternalAssets -and $segments.Length -gt 0 -and $segments[0] -ieq 'ExternalAssets') {
-        return $false
-    }
     foreach ($seg in $segments) {
         if ($seg.StartsWith('.') -or $seg.EndsWith('~') -or $seg -ieq 'desktop.ini' -or $seg -ieq 'Thumbs.db') { return $false }
     }
@@ -75,10 +66,6 @@ guid: $guid
 $metaFiles = Get-ChildItem -Path $targetAssets -Recurse -Filter "*.meta"
 
 foreach ($meta in $metaFiles) {
-    $relMeta = $meta.FullName.Substring($targetAssets.Length).TrimStart('\', '/')
-    if (-not $IncludeExternalAssets -and ($relMeta -ieq 'ExternalAssets.meta' -or $relMeta -like 'ExternalAssets\*' -or $relMeta -like 'ExternalAssets/*')) {
-        continue
-    }
     $targetPath = $meta.FullName.Substring(0, $meta.FullName.Length - 5)
     if (-not (Test-Path $targetPath)) {
         Write-Host "  [ORPHANED META] $($meta.FullName.Substring($root.Path.Length + 1))" -ForegroundColor Yellow

@@ -91,7 +91,110 @@ Thumbs.db
 [Dd]esktop.ini
 .directory
 
-# [External Heavy Assets (Local Folder / Manual Archive Share)]
-/[Aa]ssets/ExternalAssets
-/[Aa]ssets/ExternalAssets/
-/[Aa]ssets/ExternalAssets.meta
+# [Local Asset Sync Config]
+.asset-sync.local.json
+
+# [Binary Media & Art Assets under Assets/ (Synced via Google Drive: scripts/sync-assets.ps1)]
+# Images & Textures
+/[Aa]ssets/**/*.png
+/[Aa]ssets/**/*.png.meta
+/[Aa]ssets/**/*.jpg
+/[Aa]ssets/**/*.jpg.meta
+/[Aa]ssets/**/*.jpeg
+/[Aa]ssets/**/*.jpeg.meta
+/[Aa]ssets/**/*.psd
+/[Aa]ssets/**/*.psd.meta
+/[Aa]ssets/**/*.psb
+/[Aa]ssets/**/*.psb.meta
+/[Aa]ssets/**/*.tga
+/[Aa]ssets/**/*.tga.meta
+/[Aa]ssets/**/*.tif
+/[Aa]ssets/**/*.tif.meta
+/[Aa]ssets/**/*.tiff
+/[Aa]ssets/**/*.tiff.meta
+/[Aa]ssets/**/*.bmp
+/[Aa]ssets/**/*.bmp.meta
+/[Aa]ssets/**/*.exr
+/[Aa]ssets/**/*.exr.meta
+/[Aa]ssets/**/*.hdr
+/[Aa]ssets/**/*.hdr.meta
+/[Aa]ssets/**/*.webp
+/[Aa]ssets/**/*.webp.meta
+/[Aa]ssets/**/*.gif
+/[Aa]ssets/**/*.gif.meta
+/[Aa]ssets/**/*.svg
+/[Aa]ssets/**/*.svg.meta
+
+# 3D Models
+/[Aa]ssets/**/*.fbx
+/[Aa]ssets/**/*.fbx.meta
+/[Aa]ssets/**/*.obj
+/[Aa]ssets/**/*.obj.meta
+/[Aa]ssets/**/*.blend
+/[Aa]ssets/**/*.blend.meta
+/[Aa]ssets/**/*.dae
+/[Aa]ssets/**/*.dae.meta
+/[Aa]ssets/**/*.3ds
+/[Aa]ssets/**/*.3ds.meta
+/[Aa]ssets/**/*.max
+/[Aa]ssets/**/*.max.meta
+/[Aa]ssets/**/*.glb
+/[Aa]ssets/**/*.glb.meta
+/[Aa]ssets/**/*.gltf
+/[Aa]ssets/**/*.gltf.meta
+
+# Audio
+/[Aa]ssets/**/*.wav
+/[Aa]ssets/**/*.wav.meta
+/[Aa]ssets/**/*.mp3
+/[Aa]ssets/**/*.mp3.meta
+/[Aa]ssets/**/*.ogg
+/[Aa]ssets/**/*.ogg.meta
+/[Aa]ssets/**/*.aif
+/[Aa]ssets/**/*.aif.meta
+/[Aa]ssets/**/*.aiff
+/[Aa]ssets/**/*.aiff.meta
+/[Aa]ssets/**/*.flac
+/[Aa]ssets/**/*.flac.meta
+/[Aa]ssets/**/*.m4a
+/[Aa]ssets/**/*.m4a.meta
+
+# Video
+/[Aa]ssets/**/*.mp4
+/[Aa]ssets/**/*.mp4.meta
+/[Aa]ssets/**/*.mov
+/[Aa]ssets/**/*.mov.meta
+/[Aa]ssets/**/*.webm
+/[Aa]ssets/**/*.webm.meta
+/[Aa]ssets/**/*.avi
+/[Aa]ssets/**/*.avi.meta
+/[Aa]ssets/**/*.mkv
+/[Aa]ssets/**/*.mkv.meta
+
+# Fonts
+/[Aa]ssets/**/*.ttf
+/[Aa]ssets/**/*.ttf.meta
+/[Aa]ssets/**/*.otf
+/[Aa]ssets/**/*.otf.meta
+/[Aa]ssets/**/*.fon
+/[Aa]ssets/**/*.fon.meta
+/[Aa]ssets/**/*.fnt
+/[Aa]ssets/**/*.fnt.meta
+
+# Archives & Binaries
+/[Aa]ssets/**/*.zip
+/[Aa]ssets/**/*.zip.meta
+/[Aa]ssets/**/*.7z
+/[Aa]ssets/**/*.7z.meta
+/[Aa]ssets/**/*.tar
+/[Aa]ssets/**/*.tar.meta
+/[Aa]ssets/**/*.gz
+/[Aa]ssets/**/*.gz.meta
+/[Aa]ssets/**/*.rar
+/[Aa]ssets/**/*.rar.meta
+/[Aa]ssets/**/*.bytes
+/[Aa]ssets/**/*.bytes.meta
+/[Aa]ssets/**/*.bin
+/[Aa]ssets/**/*.bin.meta
+/[Aa]ssets/**/*.unitypackage
+/[Aa]ssets/**/*.unitypackage.meta

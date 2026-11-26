@@ -129,54 +129,64 @@ Write-Host "[OK] Test Harness structure valid" -ForegroundColor Green
 Write-Host ""
 
 # -------------------------------------------------------------------------
-# Gate 5: Heavy Assets & Git LFS Guardrails
+# Gate 5: Git-Tracked Binary Assets & Size Guardrails
 # -------------------------------------------------------------------------
-Write-Host "[5/5] Checking Heavy Assets & Git LFS Guardrails..." -ForegroundColor Yellow
-$externalAssetsDir = Join-Path $assetsPath "ExternalAssets"
-if (-not (Test-Path -LiteralPath $externalAssetsDir)) {
-    Write-Host "  [INFO] Local Assets/ExternalAssets folder not initialized. Run scripts/setup-external-assets.ps1" -ForegroundColor DarkGray
-}
+Write-Host "[5/5] Checking Git-Tracked Binary Assets & Size Guardrails..." -ForegroundColor Yellow
 
-$maxBytes = [long]($MaxTrackedAssetMB * 1MB)
-$disallowedExtensions = @(
-    ".psd", ".psb", ".zip", ".7z", ".rar", ".tar", ".gz",
-    ".unitypackage", ".mp4", ".mov", ".avi", ".blend", ".max"
+$binaryExtensions = @(
+    ".png", ".jpg", ".jpeg", ".psd", ".psb", ".tga", ".tif", ".tiff", ".bmp", ".exr", ".hdr", ".webp", ".gif", ".svg",
+    ".fbx", ".obj", ".blend", ".dae", ".3ds", ".max", ".glb", ".gltf",
+    ".wav", ".mp3", ".ogg", ".aif", ".aiff", ".flac", ".m4a",
+    ".mp4", ".mov", ".webm", ".avi", ".mkv",
+    ".ttf", ".otf", ".fon", ".fnt",
+    ".zip", ".7z", ".tar", ".gz", ".rar", ".bytes", ".bin", ".unitypackage"
 )
 
-$assetCandidates = Get-ChildItem -Path $assetsPath -Recurse -File -Force | Where-Object {
-    if ($_.Extension -ieq ".meta") { return $false }
-    $relInAssets = $_.FullName.Substring($assetsPath.Length).TrimStart('\', '/')
-    $segments = $relInAssets -split '[\\/]'
-    if ($segments.Length -gt 0 -and ($segments[0] -ieq "ExternalAssets" -or $segments[0] -like "AssetStoreTools*")) {
-        return $false
-    }
-    foreach ($seg in $segments) {
-        if ($seg.StartsWith('.')) { return $false }
-    }
-    return $true
-}
-
-$assetViolations = 0
-foreach ($assetFile in $assetCandidates) {
-    $relPath = $assetFile.FullName.Substring($projectRoot.Length + 1)
-    $ext = $assetFile.Extension.ToLowerInvariant()
-
-    if ($disallowedExtensions -contains $ext) {
-        Write-Host "  [VIOLATION: Source/Archive Asset Outside ExternalAssets] $relPath" -ForegroundColor Red
-        $assetViolations++
-    } elseif ($assetFile.Length -gt $maxBytes) {
-        $sizeMB = [math]::Round($assetFile.Length / 1MB, 2)
-        Write-Host "  [VIOLATION: Heavy Asset Outside ExternalAssets] $relPath ($sizeMB MB > $MaxTrackedAssetMB MB)" -ForegroundColor Red
-        $assetViolations++
-    }
-}
-
-if ($assetViolations -gt 0) {
-    Write-Host "  Move heavy/source assets to Assets/ExternalAssets/ and share via Google Drive archive (scripts/setup-external-assets.ps1)." -ForegroundColor Yellow
-    Write-Host "[FAIL] Found $assetViolations heavy/source asset violations" -ForegroundColor Red
+$maxBytes = [long]($MaxTrackedAssetMB * 1MB)
+$trackedFiles = & git -C $projectRoot ls-files Assets
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [ERROR] Failed to run 'git ls-files Assets'" -ForegroundColor Red
     $failedChecks++
 } else {
-    Write-Host "[OK] Heavy asset guardrail passed ($($assetCandidates.Count) asset files checked, limit: $MaxTrackedAssetMB MB)" -ForegroundColor Green
+    $gitViolations = 0
+    $checkedTrackedCount = 0
+
+    foreach ($relGitPath in $trackedFiles) {
+        if ([string]::IsNullOrWhiteSpace($relGitPath)) { continue }
+        $fullGitPath = Join-Path $projectRoot ($relGitPath -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $fullGitPath -PathType Leaf)) { continue }
+
+        $checkedTrackedCount++
+        $item = Get-Item -LiteralPath $fullGitPath
+        $ext = $item.Extension.ToLowerInvariant()
+
+        if ($binaryExtensions -contains $ext) {
+            Write-Host "  [VIOLATION: Binary Asset Tracked in Git] $relGitPath" -ForegroundColor Red
+            $gitViolations++
+        } elseif ($item.Length -gt $maxBytes) {
+            $sizeMB = [math]::Round($item.Length / 1MB, 2)
+            Write-Host "  [VIOLATION: Heavy File Tracked in Git] $relGitPath ($sizeMB MB > $MaxTrackedAssetMB MB)" -ForegroundColor Red
+            $gitViolations++
+        }
+    }
+
+    $localBinaryFiles = Get-ChildItem -Path $assetsPath -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object {
+        $_.Extension -ine ".meta" -and ($binaryExtensions -contains $_.Extension.ToLowerInvariant())
+    }
+    $localBinaryBytes = 0L
+    foreach ($lb in $localBinaryFiles) {
+        $localBinaryBytes += $lb.Length
+    }
+    $localBinaryKB = [math]::Round($localBinaryBytes / 1KB, 2)
+    Write-Host "  [INFO] Local git-ignored binary assets under Assets/: $($localBinaryFiles.Count) files ($localBinaryKB KB) -> sync via scripts/sync-assets.ps1" -ForegroundColor DarkGray
+
+    if ($gitViolations -gt 0) {
+        Write-Host "  Binary assets must stay out of Git (.gitignore) and be synced via scripts/sync-assets.ps1 -Export (Google Drive)." -ForegroundColor Yellow
+        Write-Host "[FAIL] Found $gitViolations Git-tracked binary/heavy asset violations" -ForegroundColor Red
+        $failedChecks++
+    } else {
+        Write-Host "[OK] Git binary guardrail passed ($checkedTrackedCount tracked files under Assets/ checked)" -ForegroundColor Green
+    }
 }
 Write-Host ""
 

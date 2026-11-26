@@ -30,27 +30,31 @@
 
 ---
 
-## 📦 대용량 외부 에셋 공유 가이드 (Google Drive / ExternalAssets)
+## 📦 바이너리 에셋 구글 드라이브 동기화 가이드 (`sync-assets.ps1`)
 
-GitHub Git LFS 무료 한도(월 10 GiB 스토리지 / 10 GiB 다운로드 대역폭)를 절약하기 위해 **경량 리소스만 Git LFS**로 관리하고, **무거운 에셋은 `.gitignore`로 제외된 `Assets/ExternalAssets/` 폴더**에서 구글 드라이브 공유 아카이브(`.zip`)로 동기화합니다.
+GitHub Git LFS 용량·대역폭 한도 문제를 원천 차단하기 위해, **전용 폴더를 강제하지 않고 `Assets/` 어느 위치에 작업하든 바이너리 에셋과 짝꿍 `.meta` 파일만 자동으로 Git에서 제외**하고 원래 경로 그대로 구글 드라이브 `.zip`으로 추출·복원합니다.
 
-| 구분 | 배치 위치 | 대상 예시 |
+| 구분 | 관리 방식 | 포함 대상 |
 | :--- | :--- | :--- |
-| **Git / Git LFS 관리** | 일반 `Assets/` 하위 | 5 MB 이하 실사용 스프라이트(`.png`), 압축 사운드(`.ogg`/`.mp3`), 폰트, 씬/프리팹 |
-| **구글 드라이브 공유** | `Assets/ExternalAssets/` | 5 MB 초과 파일, 에셋 스토어 팩, 원본 작업 파일(`.psd`, `.blend`, `.mp4`), 압축 파일(`.zip`, `.unitypackage`) |
+| **Git (코드/텍스트)** | `git commit` & `push` | 스크립트(`.cs`), 씬(`.unity`), 프리팹(`.prefab`), 머티리얼(`.mat`), `.asset`, 애니메이션(`.anim`) |
+| **구글 드라이브 (바이너리)** | `scripts/sync-assets.ps1` | `Assets/` 어디에 만들든 이미지(`.png`, `.psd` 등), 모델(`.fbx`, `.blend` 등), 사운드(`.wav`, `.ogg` 등), 영상, 폰트 + 각 `.meta` |
 
 ```powershell
-# 1) 최초 클론 시 1회 실행: 고정 GUID로 로컬 Assets/ExternalAssets 폴더 초기화
-powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1
+# 0) (선택) 내 PC의 구글 드라이브 zip 경로 1회 등록 (.asset-sync.local.json에 저장)
+powershell -ExecutionPolicy Bypass -File scripts/sync-assets.ps1 -SetDefaultArchive "구글드라이브경로\ArcherCraftor_Assets.zip"
 
-# 2) 구글 드라이브에서 받은 zip 적용 (-CleanExtract로 이전 버전 잔존 파일 정리 후 해제)
-powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1 -ArchivePath "다운로드경로\ExternalAssets.zip" -CleanExtract
+# 1) 현재 로컬 바이너리 에셋 현황 확인
+powershell -ExecutionPolicy Bypass -File scripts/sync-assets.ps1 -Status
 
-# 3) 구글 드라이브 업로드용 zip 생성 (반드시 Unity 에디터에서 .meta 생성 후 실행)
-powershell -ExecutionPolicy Bypass -File scripts/setup-external-assets.ps1 -ExportArchivePath "공유경로\ExternalAssets.zip"
+# 2) 내보내기(추출): Unity에서 .meta 생성 후, Assets/ 전체의 바이너리 + .meta를 원래 경로 그대로 zip 생성
+powershell -ExecutionPolicy Bypass -File scripts/sync-assets.ps1 -Export
+# (기본 경로 미설정 시: -ArchivePath "출력경로\ArcherCraftor_Assets.zip" 추가)
+
+# 3) 복원(가져오기): git pull 후, 구글 드라이브 zip을 풀어 원래 Assets/ 경로에 그대로 복원
+powershell -ExecutionPolicy Bypass -File scripts/sync-assets.ps1 -Import -CleanBeforeImport
 ```
 
-> **중요**: 공유 `.zip`에는 반드시 **Unity가 생성한 `.meta` 파일**이 함께 포함되어야 두 개발자 PC에서 씬/프리팹의 에셋 참조(GUID)가 깨지지 않습니다. `-ExportArchivePath` 옵션을 사용하면 `.meta` 누락 여부를 점검한 뒤 함께 패키징합니다.
+> **중요**: 새 에셋을 추가한 뒤 `-Export` 하기 전에는 **반드시 Unity 에디터를 한 번 열어 `.meta` 파일이 생성되게 해 주세요.** 그래야 팀원 PC에서 복원했을 때 씬/프리팹의 에셋 참조(GUID)가 깨지지 않습니다.
 
 ---
 
@@ -88,9 +92,8 @@ Assets/
 ---
 
 ## 📚 기획 및 설정 문서 (Docs)
-- [에이전트 개발 하네스 규약 (AGENTS.md)](AGENTS.md) : 프로젝트 규칙, 어셈블리 경계, 대용량 에셋(`ExternalAssets`) 분리 원칙
+- [에이전트 개발 하네스 규약 (AGENTS.md)](AGENTS.md) : 프로젝트 규칙, 어셈블리 경계, 텍스트(Git) vs 바이너리(구글 드라이브) 분리 원칙
 - [시스템 아키텍처 문서 (ARCHITECTURE.md)](docs/ARCHITECTURE.md) : 어셈블리 계층, 이벤트 시퀀스, 테스트 전략
 - [태스크 로드맵 및 백로그 (TASKS.md)](docs/TASKS.md) : 하네스 구축 현황 및 구현 백로그
 - [게임 기획 및 컨셉 문서 (GameConcept.md)](docs/GameConcept.md) : 조작 체계, 탄막 상쇄, 현장 즉석 제작 시스템
 - [스토리 및 세계관 문서 (Story.md)](docs/Story.md) : 세계관 배경, 주인공 설정, 챕터별 서사 및 연출 방식
-
